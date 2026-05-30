@@ -34,7 +34,7 @@ export function Login() {
         {err && <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">{err}</div>}
         <button type="submit" className="btn-primary w-full">Entrar</button>
         <p className="text-center text-[11px] text-muted-foreground">
-          Padrão: <code className="rounded bg-muted px-1">admin</code> / <code className="rounded bg-muted px-1">admin</code> — mude após o primeiro login.
+          Primeira instalação: <code className="rounded bg-muted px-1">admin</code> / <code className="rounded bg-muted px-1">admin</code> — altere a palavra-passe em Utilizadores.
         </p>
       </form>
     </main>

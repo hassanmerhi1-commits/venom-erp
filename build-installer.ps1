@@ -26,6 +26,12 @@ Write-Host "==> Converting icon PNG -> ICO for Windows installer..."
 Push-Location $ex
 node build/make-ico.cjs
 if ($LASTEXITCODE -ne 0) { Pop-Location; throw "Icon conversion failed" }
+# Vite walks up to parent package.json — strip UTF-8 BOM if present
+$pkgJson = Join-Path $ex "package.json"
+$bytes = [System.IO.File]::ReadAllBytes($pkgJson)
+if ($bytes.Length -ge 3 -and $bytes[0] -eq 239 -and $bytes[1] -eq 187 -and $bytes[2] -eq 191) {
+  [System.IO.File]::WriteAllBytes($pkgJson, $bytes[3..($bytes.Length - 1)])
+}
 Pop-Location
 
 Write-Host "==> Building web (vite)..."

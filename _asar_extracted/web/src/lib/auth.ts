@@ -5,7 +5,14 @@ export type Role = "admin" | "user";
 export type User = { username: string; password: string; role: Role; createdAt: string };
 
 const USERS_KEY = "erp.users.v1";
-const SESSION_KEY = "erp.session.v1";
+const LEGACY_SESSION_KEY = "erp.session.v1";
+
+/** Session lives in memory only — app restart always requires login. */
+let memorySession: { username: string; role: Role } | null = null;
+
+if (typeof window !== "undefined") {
+  try { window.localStorage.removeItem(LEGACY_SESSION_KEY); } catch { /* ignore */ }
+}
 
 function readUsers(): User[] {
   if (typeof window === "undefined") return [];
@@ -27,13 +34,7 @@ function writeUsers(list: User[]) {
 }
 
 export function getSession(): { username: string; role: Role } | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.localStorage.getItem(SESSION_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
+  return memorySession;
 }
 
 export function login(username: string, password: string): { ok: true } | { ok: false; error: string } {
@@ -42,13 +43,13 @@ export function login(username: string, password: string): { ok: true } | { ok: 
   if (!u || u.password !== password) {
     return { ok: false, error: "Utilizador ou palavra-passe inválidos." };
   }
-  window.localStorage.setItem(SESSION_KEY, JSON.stringify({ username: u.username, role: u.role }));
+  memorySession = { username: u.username, role: u.role };
   window.dispatchEvent(new CustomEvent("erp:auth"));
   return { ok: true };
 }
 
 export function logout() {
-  window.localStorage.removeItem(SESSION_KEY);
+  memorySession = null;
   window.dispatchEvent(new CustomEvent("erp:auth"));
 }
 
