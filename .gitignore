@@ -1,0 +1,23 @@
+# Dependencies
+**/node_modules/
+_nm_stash/
+
+# Build outputs (installers built locally; published via GitHub Releases)
+dev-server/electron-app/release/
+updates-upload/*.exe
+updates-upload/*.blockmap
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.log
+.vscode/
+.idea/
+
+# Secrets
+.env
+.env.*
+*.pem
+
+# Large packaged app copy (source lives in _asar_extracted)
+*.asar

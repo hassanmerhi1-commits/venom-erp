@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8" />
+<title>VENOM ERP</title>
+<style>
+  :root {
+    --bg: #fafafa; --fg: #111; --muted: #6b7280; --border: #e5e7eb;
+    --card: #fff; --primary: #111; --primary-fg: #fff;
+    --secondary: #f3f4f6; --secondary-fg: #111;
+    --positive: #059669; --negative: #dc2626; --soft: #f9fafb;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+         background: var(--bg); color: var(--fg); }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 32px 28px; }
+  header { display:flex; justify-content:space-between; align-items:end; gap:16px; margin-bottom:28px; }
+  h1 { margin:0; font-size: 26px; letter-spacing: -.01em; }
+  .sub { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  .total-badge { text-align: right; }
+  .total-badge .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+  .total-badge .val { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .grid { display: grid; gap: 20px; grid-template-columns: 1.1fr 1fr; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+  .card { background: var(--card); border:1px solid var(--border); border-radius:12px; padding:22px;
+          box-shadow: 0 1px 2px rgba(0,0,0,.03); }
+  h2 { margin: 0 0 14px; font-size: 16px; font-weight: 600; }
+  label { display:block; margin-bottom: 12px; }
+  label .lbl { display:block; font-size: 11px; font-weight: 500; color: var(--muted); margin-bottom: 6px; }
+  input { width: 100%; padding: 9px 12px; font-size: 14px; border-radius: 8px;
+          border: 1px solid var(--border); background: #fff; outline: none;
+          transition: border-color .15s, box-shadow .15s; font-family: inherit; }
+  input:focus { border-color: #111; box-shadow: 0 0 0 3px rgba(0,0,0,.08); }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .stats { display:grid; grid-template-columns: repeat(4, 1fr); gap: 10px;
+           background: var(--soft); border-radius: 10px; padding: 14px; margin: 12px 0; }
+  .stat .l { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .stat .v { font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; margin-top: 2px; }
+  .pos { color: var(--positive); } .neg { color: var(--negative); }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+  button { font-family: inherit; font-size: 13px; border-radius: 8px; padding: 9px 16px;
+           border: 1px solid transparent; cursor: pointer; }
+  .btn-primary { background: var(--primary); color: var(--primary-fg); }
+  .btn-primary:hover { opacity: .9; }
+  .btn-secondary { background: var(--secondary); color: var(--secondary-fg); }
+  .btn-secondary:hover { background: #e5e7eb; }
+  .btn-ghost { background: transparent; color: var(--muted); }
+  .btn-ghost:hover { background: var(--secondary); color: var(--fg); }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  .history-head { display:flex; justify-content:space-between; align-items:center; margin-bottom: 14px; }
+  .history-tools { display:flex; gap: 6px; }
+  .totals3 { display:grid; grid-template-columns: repeat(3,1fr); gap: 8px;
+             background: var(--soft); border-radius:10px; padding: 12px; margin-bottom: 10px; }
+  ul.sales { list-style:none; padding:0; margin:0; max-height: 480px; overflow:auto; }
+  ul.sales li { display:flex; justify-content:space-between; align-items:center; gap:12px;
+                padding: 12px 0; border-top: 1px solid var(--border); }
+  ul.sales li:first-child { border-top: none; }
+  .name { font-size: 14px; font-weight: 500; }
+  .meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .rev { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
+  .prof { font-size: 11px; font-variant-numeric: tabular-nums; text-align: right; }
+  .del { background: transparent; color: var(--muted); border:none; padding: 4px 8px; font-size: 18px; }
+  .del:hover { background: var(--secondary); color: var(--fg); border-radius: 6px; }
+  .empty { text-align:center; padding: 48px 0; color: var(--muted); font-size: 13px; }
+  footer { text-align:center; color: var(--muted); font-size: 11px; margin-top: 32px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>VENOM ERP</h1>
+      <div class="sub">Compras, vendas, stock e relatórios. Dados guardados localmente.</div>
+    </div>
+    <div class="total-badge">
+      <div class="lbl">Lucro total</div>
+      <div class="val" id="badgeProfit">Kz 0,00</div>
+    </div>
+  </header>
+
+  <div class="grid">
+    <div class="card">
+      <h2>Novo cálculo</h2>
+      <label><span class="lbl">Produto</span><input id="name" placeholder="Ex: Caixa de água 200L" /></label>
+      <div class="row">
+        <label><span class="lbl">Custo unitário (AOA)</span><input id="cost" type="number" min="0" placeholder="0" /></label>
+        <label><span class="lbl">Quantidade</span><input id="qty" type="number" min="0" value="1" /></label>
+      </div>
+      <div class="row">
+        <label><span class="lbl">Margem (%)</span><input id="margin" type="number" value="30" /></label>
+        <label><span class="lbl">Preço de venda (AOA)</span><input id="price" type="number" /></label>
+      </div>
+      <div class="stats">
+        <div class="stat"><div class="l">Preço unit.</div><div class="v" id="sPrice">—</div></div>
+        <div class="stat"><div class="l">Lucro unit.</div><div class="v" id="sUnitP">—</div></div>
+        <div class="stat"><div class="l">Receita</div><div class="v" id="sRev">—</div></div>
+        <div class="stat"><div class="l">Lucro total</div><div class="v" id="sTotalP">—</div></div>
+      </div>
+      <div class="actions">
+        <button class="btn-primary" id="save">Guardar venda</button>
+        <button class="btn-secondary" id="reset">Limpar</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="history-head">
+        <h2>Histórico</h2>
+        <div class="history-tools">
+          <button class="btn-secondary" id="exportCsv">Exportar CSV</button>
+          <button class="btn-ghost" id="clearAll">Apagar tudo</button>
+        </div>
+      </div>
+      <div id="totals3" class="totals3" style="display:none;">
+        <div class="stat"><div class="l">Receita</div><div class="v" id="tRev">—</div></div>
+        <div class="stat"><div class="l">Custo</div><div class="v" id="tCost">—</div></div>
+        <div class="stat"><div class="l">Lucro</div><div class="v" id="tProf">—</div></div>
+      </div>
+      <ul class="sales" id="sales"></ul>
+      <div class="empty" id="empty">Sem vendas guardadas ainda.</div>
+    </div>
+  </div>
+
+  <footer>Dados guardados apenas neste computador.</footer>
+</div>
+
+<script>
+const STORAGE_KEY = "calc.sales.v1";
+const fmt = (n) => new Intl.NumberFormat("pt-AO", { style: "currency", currency: "AOA", maximumFractionDigits: 2 }).format(isFinite(n) ? n : 0);
+
+const $ = (id) => document.getElementById(id);
+let sales = [];
+let lastEdited = "margin";
+
+function loadSales() {
+  try { sales = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]"); } catch { sales = []; }
+}
+function saveSales() { localStorage.setItem(STORAGE_KEY, JSON.stringify(sales)); }
+
+function readInputs() {
+  const c = parseFloat($("cost").value) || 0;
+  const m = parseFloat($("margin").value) || 0;
+  const p = parseFloat($("price").value) || 0;
+  const q = Math.max(0, parseFloat($("qty").value) || 0);
+  const derivedPrice = lastEdited === "margin" ? c * (1 + m / 100) : p;
+  const derivedMargin = lastEdited === "price" ? (c > 0 ? ((p - c) / c) * 100 : 0) : m;
+  return { c, m, p, q, derivedPrice, derivedMargin };
+}
+
+function recompute() {
+  const { c, q, derivedPrice, derivedMargin } = readInputs();
+  const unitProfit = derivedPrice - c;
+  const revenue = derivedPrice * q;
+  const totalProfit = unitProfit * q;
+
+  if (lastEdited === "margin") $("price").value = derivedPrice ? derivedPrice.toFixed(2) : "";
+  if (lastEdited === "price") $("margin").value = derivedMargin ? derivedMargin.toFixed(2) : "0";
+
+  $("sPrice").textContent = fmt(derivedPrice);
+  $("sUnitP").textContent = fmt(unitProfit);
+  $("sUnitP").className = "v " + (unitProfit >= 0 ? "pos" : "neg");
+  $("sRev").textContent = fmt(revenue);
+  $("sTotalP").textContent = fmt(totalProfit);
+  $("sTotalP").className = "v " + (totalProfit >= 0 ? "pos" : "neg");
+}
+
+function renderHistory() {
+  const ul = $("sales");
+  ul.innerHTML = "";
+  if (sales.length === 0) {
+    $("empty").style.display = "block";
+    $("totals3").style.display = "none";
+    $("badgeProfit").textContent = fmt(0);
+    $("exportCsv").disabled = true; $("clearAll").disabled = true;
+    return;
+  }
+  $("empty").style.display = "none";
+  $("totals3").style.display = "grid";
+  $("exportCsv").disabled = false; $("clearAll").disabled = false;
+
+  const t = sales.reduce((a, s) => ({
+    revenue: a.revenue + s.revenue, cost: a.cost + s.cost * s.qty, profit: a.profit + s.profit,
+  }), { revenue: 0, cost: 0, profit: 0 });
+  $("tRev").textContent = fmt(t.revenue);
+  $("tCost").textContent = fmt(t.cost);
+  $("tProf").textContent = fmt(t.profit);
+  $("tProf").className = "v " + (t.profit >= 0 ? "pos" : "neg");
+  $("badgeProfit").textContent = fmt(t.profit);
+
+  sales.forEach((s) => {
+    const li = document.createElement("li");
+    li.innerHTML = `
+      <div style="min-width:0;flex:1;">
+        <div class="name"></div>
+        <div class="meta"></div>
+      </div>
+      <div>
+        <div class="rev"></div>
+        <div class="prof ${s.profit >= 0 ? "pos" : "neg"}"></div>
+      </div>
+      <button class="del" aria-label="Remover">×</button>`;
+    li.querySelector(".name").textContent = s.name;
+    li.querySelector(".meta").textContent =
+      new Date(s.date).toLocaleString("pt-AO") + " · " + s.qty + "× @ " + fmt(s.price);
+    li.querySelector(".rev").textContent = fmt(s.revenue);
+    li.querySelector(".prof").textContent = (s.profit >= 0 ? "+" : "") + fmt(s.profit);
+    li.querySelector(".del").onclick = () => { sales = sales.filter(x => x.id !== s.id); saveSales(); renderHistory(); };
+    ul.appendChild(li);
+  });
+}
+
+["cost","qty","margin","price","name"].forEach(id => $(id).addEventListener("input", recompute));
+$("margin").addEventListener("input", () => { lastEdited = "margin"; });
+$("price").addEventListener("input", () => { lastEdited = "price"; });
+
+$("save").onclick = () => {
+  const name = $("name").value.trim();
+  const { c, q, derivedPrice } = readInputs();
+  if (!name || c <= 0 || q <= 0) { alert("Preencha produto, custo e quantidade."); return; }
+  const unitProfit = derivedPrice - c;
+  sales.unshift({
+    id: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random())),
+    date: new Date().toISOString(),
+    name, cost: c, price: derivedPrice, qty: q,
+    revenue: derivedPrice * q, profit: unitProfit * q,
+  });
+  saveSales();
+  $("name").value = ""; $("cost").value = ""; $("price").value = "";
+  $("margin").value = "30"; $("qty").value = "1"; lastEdited = "margin";
+  recompute(); renderHistory(); $("name").focus();
+};
+
+$("reset").onclick = () => {
+  ["name","cost","price"].forEach(id => $(id).value = "");
+  $("margin").value = "30"; $("qty").value = "1"; lastEdited = "margin"; recompute();
+};
+
+$("clearAll").onclick = () => {
+  if (confirm("Apagar todo o histórico?")) { sales = []; saveSales(); renderHistory(); }
+};
+
+$("exportCsv").onclick = () => {
+  const rows = [["Data","Produto","Custo unit.","Preço unit.","Qtd","Receita","Lucro"]];
+  sales.forEach(s => rows.push([
+    new Date(s.date).toLocaleString("pt-AO"), s.name,
+    s.cost.toFixed(2), s.price.toFixed(2), String(s.qty),
+    s.revenue.toFixed(2), s.profit.toFixed(2)
+  ]));
+  const csv = rows.map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = "vendas-" + new Date().toISOString().slice(0,10) + ".csv"; a.click();
+  URL.revokeObjectURL(url);
+};
+
+loadSales(); recompute(); renderHistory();
+</script>
+</body>
+</html>
