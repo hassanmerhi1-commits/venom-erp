@@ -1,62 +1,63 @@
-{
-  "name": "venom-erp",
-  "productName": "VENOM ERP",
-  "version": "1.1.0",
-  "description": "VENOM ERP — offline stock, sales, purchases & accounts",
-  "main": "main.cjs",
-  "author": "VENOM",
-  "private": true,
-  "scripts": {
-    "build:web": "npm run build --prefix web",
-    "dist": "electron-builder --win nsis",
-    "dist:portable": "electron-builder --win portable"
-  },
-  "dependencies": {
-    "electron-updater": "^6.6.2"
-  },
-  "devDependencies": {
-    "electron": "^34.5.8",
-    "electron-builder": "^25.1.8",
-    "png-to-ico": "^2.1.8"
-  },
-  "build": {
-    "appId": "com.venom.erp",
-    "productName": "VENOM ERP",
-    "copyright": "Copyright © VENOM ERP",
-    "directories": {
-      "output": "../dev-server/electron-app/release/installer",
-      "buildResources": "build"
-    },
-    "files": [
-      "main.cjs",
-      "preload.cjs",
-      "package.json",
-      "web/dist/**/*"
-    ],
-    "asar": true,
-    "win": {
-      "target": [
-        {
-          "target": "nsis",
-          "arch": [
-            "x64"
-          ]
-        }
-      ],
-      "icon": "build/icon.ico"
-    },
-    "nsis": {
-      "oneClick": false,
-      "allowToChangeInstallationDirectory": true,
-      "allowElevation": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "shortcutName": "VENOM ERP",
-      "deleteAppDataOnUninstall": false
-    },
-    "publish": {
-      "provider": "generic",
-      "url": "https://YOUR-SERVER.com/venom-erp/updates/"
-    }
-  }
+﻿{
+    "name":  "venom-erp",
+    "productName":  "VENOM ERP",
+    "version":  "1.1.0",
+    "description":  "VENOM ERP â€” offline stock, sales, purchases \u0026 accounts",
+    "main":  "main.cjs",
+    "author":  "VENOM",
+    "private":  true,
+    "scripts":  {
+                    "build:web":  "npm run build --prefix web",
+                    "dist":  "electron-builder --win nsis",
+                    "dist:portable":  "electron-builder --win portable"
+                },
+    "dependencies":  {
+                         "electron-updater":  "^6.6.2"
+                     },
+    "devDependencies":  {
+                            "electron":  "^34.5.8",
+                            "electron-builder":  "^25.1.8",
+                            "png-to-ico":  "^2.1.8"
+                        },
+    "build":  {
+                  "appId":  "com.venom.erp",
+                  "productName":  "VENOM ERP",
+                  "copyright":  "Copyright Â© VENOM ERP",
+                  "directories":  {
+                                      "output":  "../dev-server/electron-app/release/installer",
+                                      "buildResources":  "build"
+                                  },
+                  "files":  [
+                                "main.cjs",
+                                "preload.cjs",
+                                "package.json",
+                                "web/dist/**/*"
+                            ],
+                  "asar":  true,
+                  "win":  {
+                              "target":  [
+                                             {
+                                                 "target":  "nsis",
+                                                 "arch":  [
+                                                              "x64"
+                                                          ]
+                                             }
+                                         ],
+                              "icon":  "build/icon.ico"
+                          },
+                  "nsis":  {
+                               "oneClick":  false,
+                               "allowToChangeInstallationDirectory":  true,
+                               "allowElevation":  true,
+                               "createDesktopShortcut":  true,
+                               "createStartMenuShortcut":  true,
+                               "shortcutName":  "VENOM ERP",
+                               "deleteAppDataOnUninstall":  false
+                           },
+                  "publish":  {
+                                  "provider":  "github",
+                                  "owner":  "hassanmerhi1-commits",
+                                  "repo":  "venom-erp"
+                              }
+              }
 }

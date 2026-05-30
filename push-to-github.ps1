@@ -13,17 +13,19 @@ Remove-Item Env:GH_TOKEN -ErrorAction SilentlyContinue
 Write-Host "==> Checking GitHub login..."
 $loggedIn = $false
 try {
+  Remove-Item Env:GH_TOKEN -ErrorAction SilentlyContinue
   gh auth status *> $null
   if ($LASTEXITCODE -eq 0) { $loggedIn = $true }
 } catch { $loggedIn = $false }
 
 if (-not $loggedIn) {
-  Write-Host "Not logged into GitHub yet — complete login in the browser window."
+  Write-Host "Not logged into GitHub yet - complete login in the browser window."
   gh auth login --hostname github.com --git-protocol https --web
   if ($LASTEXITCODE -ne 0) { throw "GitHub login failed or was cancelled" }
 }
 
-$owner = (gh api user -q .login).Trim()
+$owner = (gh api user -q .login 2>$null).Trim()
+if (-not $owner) { throw "Could not read GitHub username - run: gh auth login" }
 Write-Host "GitHub user: $owner"
 
 $cfg = Get-Content $cfgPath -Raw | ConvertFrom-Json
@@ -58,14 +60,17 @@ Desktop ERP for purchases, sales, stock, accounts, and reports; ships as NSIS in
 }
 
 Write-Host "==> Creating GitHub repo (if needed) and pushing..."
+Remove-Item Env:GH_TOKEN -ErrorAction SilentlyContinue
 gh repo view $repo 2>$null | Out-Null
 if ($LASTEXITCODE -ne 0) {
   $vis = if ($cfg.private) { "--private" } else { "--public" }
-  gh repo create $cfg.repo $vis --source=. --remote=origin --description "VENOM ERP — offline desktop ERP"
+  gh repo create $cfg.repo $vis --source=. --remote=origin --description "VENOM ERP - offline desktop ERP"
 } else {
   $remotes = git remote
   if ($remotes -notcontains "origin") {
     git remote add origin "https://github.com/$repo.git"
+  } elseif ((git remote get-url origin) -notmatch $cfg.owner) {
+    git remote set-url origin "https://github.com/$repo.git"
   }
 }
 
@@ -83,9 +88,9 @@ if ($PublishRelease) {
   $env:GH_TOKEN = gh auth token
   & (Join-Path $root "build-installer.ps1") -SkipInstall -Publish
   Remove-Item Env:GH_TOKEN -ErrorAction SilentlyContinue
-  Write-Host "Release published — colleagues download Setup.exe from Releases; updates are automatic."
+  Write-Host "Release published - colleagues download Setup.exe from Releases; updates are automatic."
 } else {
   Write-Host ""
-  Write-Host "Next — publish installer to GitHub Releases (turns on auto-update):"
-  Write-Host "  powershell -ExecutionPolicy Bypass -File push-to-github.ps1 -PublishRelease"
+  Write-Host "Next - publish installer to GitHub Releases (turns on auto-update):"
+  Write-Host '  powershell -ExecutionPolicy Bypass -File push-to-github.ps1 -PublishRelease'
 }
