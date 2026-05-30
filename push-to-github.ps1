@@ -61,8 +61,13 @@ Desktop ERP for purchases, sales, stock, accounts, and reports; ships as NSIS in
 
 Write-Host "==> Creating GitHub repo (if needed) and pushing..."
 Remove-Item Env:GH_TOKEN -ErrorAction SilentlyContinue
-gh repo view $repo 2>$null | Out-Null
-if ($LASTEXITCODE -ne 0) {
+$repoExists = $false
+try {
+  gh repo view $repo *> $null
+  if ($LASTEXITCODE -eq 0) { $repoExists = $true }
+} catch { $repoExists = $false }
+
+if (-not $repoExists) {
   $vis = if ($cfg.private) { "--private" } else { "--public" }
   gh repo create $cfg.repo $vis --source=. --remote=origin --description "VENOM ERP - offline desktop ERP"
 } else {
