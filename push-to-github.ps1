@@ -31,10 +31,15 @@ Write-Host "GitHub user: $owner"
 $cfg = Get-Content $cfgPath -Raw | ConvertFrom-Json
 if (-not $cfg.owner) { $cfg.owner = $owner }
 if (-not $cfg.repo) { $cfg.repo = "venom-erp" }
-$cfg | ConvertTo-Json | Set-Content $cfgPath -Encoding UTF8
 
 $repo = "$($cfg.owner)/$($cfg.repo)"
 Write-Host "Repository: $repo"
+
+function Write-JsonNoBom($Path, $Object) {
+  $json = $Object | ConvertTo-Json -Depth 20
+  $utf8 = New-Object System.Text.UTF8Encoding $false
+  [System.IO.File]::WriteAllText($Path, $json, $utf8)
+}
 
 $pkg = Get-Content $pkgPath -Raw | ConvertFrom-Json
 $pkg.build.publish = [ordered]@{
@@ -42,7 +47,8 @@ $pkg.build.publish = [ordered]@{
   owner    = $cfg.owner
   repo     = $cfg.repo
 }
-$pkg | ConvertTo-Json -Depth 20 | Set-Content $pkgPath -Encoding UTF8
+Write-JsonNoBom $pkgPath $pkg
+Write-JsonNoBom $cfgPath $cfg
 
 Write-Host "==> Initializing git (if needed)..."
 Push-Location $root
