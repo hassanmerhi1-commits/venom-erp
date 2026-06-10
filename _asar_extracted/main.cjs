@@ -83,6 +83,74 @@ ipcMain.on("venom-updater:install", () => {
   if (autoUpdater) autoUpdater.quitAndInstall(false, true);
 });
 
+let printBusy = false;
+
+function silentThermalPrint(html, printerName) {
+  if (printBusy) return Promise.resolve({ ok: false, error: "print-busy" });
+  printBusy = true;
+  return new Promise((resolve) => {
+    const cfg = readConfig();
+    const deviceName = printerName || cfg.thermalPrinter || "";
+    const tmp = path.join(app.getPath("temp"), `venom-receipt-${Date.now()}.html`);
+    try {
+      fs.writeFileSync(tmp, html, "utf8");
+    } catch (e) {
+      printBusy = false;
+      return resolve({ ok: false, error: String(e) });
+    }
+
+    const printWin = new BrowserWindow({
+      show: false,
+      width: 320,
+      height: 900,
+      webPreferences: { nodeIntegration: false, contextIsolation: true },
+    });
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      printBusy = false;
+      try { fs.unlinkSync(tmp); } catch {}
+      try { printWin.destroy(); } catch {}
+      resolve(result);
+    };
+    const t = setTimeout(() => finish({ ok: false, error: "print-timeout" }), 30000);
+    printWin.webContents.once("did-fail-load", () => {
+      clearTimeout(t);
+      finish({ ok: false, error: "receipt-load-failed" });
+    });
+    printWin.webContents.once("did-finish-load", () => {
+      setTimeout(() => {
+        const opts = {
+          silent: true,
+          printBackground: false,
+          copies: 1,
+          margins: { marginType: "none" },
+          pageSize: { width: 80000, height: 297000 },
+        };
+        if (deviceName) opts.deviceName = deviceName;
+        printWin.webContents.print(opts, (ok, err) => {
+          clearTimeout(t);
+          finish(ok ? { ok: true } : { ok: false, error: String(err || "print-failed") });
+        });
+      }, 150);
+    });
+    printWin.loadFile(tmp).catch((e) => {
+      clearTimeout(t);
+      finish({ ok: false, error: String(e) });
+    });
+  });
+}
+
+ipcMain.handle("venom-print:thermal", (_e, html, printerName) => silentThermalPrint(html, printerName));
+ipcMain.handle("venom-print:get-printer", () => readConfig().thermalPrinter || "");
+ipcMain.handle("venom-print:set-printer", (_e, name) => {
+  const cfg = readConfig();
+  cfg.thermalPrinter = name || "";
+  writeConfig(cfg);
+  return cfg.thermalPrinter;
+});
+
 // --- Database file location ---
 const CONFIG_FILE = path.join(app.getPath("userData"), "venom-config.json");
 

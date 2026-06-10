@@ -38,6 +38,7 @@ export function Users() {
           <div>
             <label className="label">Função</label>
             <select className="input" value={role} onChange={(e) => setRole(e.target.value as Role)}>
+              <option value="caixa">Caixa (só vendas)</option>
               <option value="user">Utilizador</option>
               <option value="admin">Admin</option>
             </select>
@@ -67,7 +68,7 @@ export function Users() {
               {users.map((x) => (
                 <tr key={x.username} className="border-b last:border-0">
                   <td className="py-2 pr-2 font-medium">{x.username}{x.username === session?.username && <span className="ml-2 pill" style={{ background: "var(--muted)", color: "var(--muted-foreground)" }}>você</span>}</td>
-                  <td className="py-2 pr-2"><span className="pill" style={{ background: x.role === "admin" ? "color-mix(in oklab, var(--primary) 18%, transparent)" : "var(--muted)", color: x.role === "admin" ? "var(--primary)" : "var(--muted-foreground)" }}>{x.role}</span></td>
+                  <td className="py-2 pr-2"><span className="pill" style={{ background: x.role === "admin" ? "color-mix(in oklab, var(--primary) 18%, transparent)" : x.role === "caixa" ? "color-mix(in oklab, var(--primary) 10%, transparent)" : "var(--muted)", color: x.role === "admin" || x.role === "caixa" ? "var(--primary)" : "var(--muted-foreground)" }}>{x.role === "caixa" ? "Caixa" : x.role}</span></td>
                   <td className="py-2 pr-2">
                     <div className="flex gap-2">
                       <input

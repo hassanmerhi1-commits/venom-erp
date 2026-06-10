@@ -8,6 +8,12 @@ contextBridge.exposeInMainWorld("venomDb", {
   reveal: () => ipcRenderer.sendSync("venom-db:reveal"),
 });
 
+contextBridge.exposeInMainWorld("venomPrint", {
+  thermal: (html, printerName) => ipcRenderer.invoke("venom-print:thermal", html, printerName),
+  getPrinter: () => ipcRenderer.invoke("venom-print:get-printer"),
+  setPrinter: (name) => ipcRenderer.invoke("venom-print:set-printer", name),
+});
+
 contextBridge.exposeInMainWorld("venomUpdater", {
   getVersion: () => ipcRenderer.invoke("venom-updater:get-version"),
   check: () => ipcRenderer.invoke("venom-updater:check"),

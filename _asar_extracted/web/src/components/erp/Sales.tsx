@@ -1,22 +1,50 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useErp, fmt, type Sale, productPickLabel, productTitle } from "@/lib/erp-store";
-import { useAccounts, filialName } from "@/lib/accounts-store";
+import { useAccounts, filialName, getCompany } from "@/lib/accounts-store";
+import { useAuth } from "@/lib/auth";
 import { printSaleInvoice, groupSales, type PdfResult } from "@/lib/invoices";
+import {
+  renderThermalDayCloseReceipt,
+  thermalReceiptNumber,
+} from "@/lib/thermal-receipt";
+import { printThermalReceipt, printThermalSaleCopies } from "@/lib/print";
+import {
+  todayISO,
+  isDayClosed,
+  closeCashierDay,
+  daySalesSummary,
+} from "@/lib/cashier-day";
 import { Modal, PdfPreviewModal } from "./Modal";
 
 type Mode = "single" | "daily";
 type Item = { productId: string; qty: string; unitPrice: string };
 
 export function Sales() {
+  const { session } = useAuth();
+  const isCaixa = session?.role === "caixa";
   const { products, sales, recordSale, updateSaleGroup, removeSale } = useErp();
   const { filiais, company } = useAccounts();
+  const today = todayISO();
+  const activeFilial = company.currentFilialId ?? "";
+  const [dayTick, setDayTick] = useState(0);
+  useEffect(() => {
+    const sync = () => setDayTick((n) => n + 1);
+    window.addEventListener("erp:change", sync);
+    return () => window.removeEventListener("erp:change", sync);
+  }, []);
+  void dayTick;
+  const dayClosed = isCaixa && isDayClosed(today, activeFilial);
+  const daySummary = isCaixa ? daySalesSummary(sales, today, activeFilial) : null;
+
   const [mode, setMode] = useState<Mode>("single");
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(today);
   const [filialId, setFilialId] = useState<string>(company.currentFilialId ?? "");
   const [items, setItems] = useState<Item[]>([{ productId: "", qty: "", unitPrice: "" }]);
   const [formOpen, setFormOpen] = useState(false);
   const [editingDate, setEditingDate] = useState<string | null>(null);
   const [pdf, setPdf] = useState<PdfResult | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [closingDay, setClosingDay] = useState(false);
 
   const setItem = (i: number, patch: Partial<Item>) =>
     setItems((it) => it.map((x, idx) => (idx === i ? { ...x, ...patch } : x)));
@@ -64,22 +92,75 @@ export function Sales() {
   const resetForm = () => {
     setItems([{ productId: "", qty: "", unitPrice: "" }]);
     setFilialId(company.currentFilialId ?? "");
-    setDate(new Date().toISOString().slice(0, 10));
+    setDate(today);
     setMode("single");
     setEditingDate(null);
   };
 
-  const save = () => {
-    if (valid.length === 0) return;
-    if (anyOver && !confirm("Algumas linhas excedem o stock. Continuar mesmo assim?")) return;
-    const stamp = new Date(`${date}T${new Date().toISOString().slice(11, 19)}`).toISOString();
-    if (editingDate) {
-      updateSaleGroup(editingDate, stamp, valid, filialId || undefined);
-    } else {
-      recordSale(stamp, valid, filialId || undefined);
+  const save = async () => {
+    if (valid.length === 0 || saving) return;
+    if (isCaixa && dayClosed) {
+      alert("Dia já fechado. Não é possível registar mais vendas.");
+      return;
     }
-    resetForm();
-    setFormOpen(false);
+    if (anyOver && !confirm("Algumas linhas excedem o stock. Continuar mesmo assim?")) return;
+    setSaving(true);
+    try {
+      const stamp = new Date(`${isCaixa ? today : date}T${new Date().toISOString().slice(11, 19)}`).toISOString();
+      const saleFilial = isCaixa ? activeFilial : filialId || undefined;
+      if (editingDate) {
+        updateSaleGroup(editingDate, stamp, valid, saleFilial);
+      } else {
+        recordSale(stamp, valid, saleFilial);
+        const companyInfo = getCompany();
+        await printThermalSaleCopies({
+          companyName: companyInfo.name,
+          companyPhone: companyInfo.phone,
+          filialName: filiais.length ? filialName(filiais, saleFilial) : undefined,
+          dateISO: stamp,
+          receiptNo: thermalReceiptNumber(stamp),
+          items: valid.map((it) => ({
+            product: products.find((p) => p.id === it.productId),
+            qty: it.qty,
+            unitPrice: it.unitPrice,
+          })),
+        });
+      }
+      resetForm();
+      setFormOpen(false);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const closeDay = async () => {
+    if (!isCaixa || dayClosed || closingDay) return;
+    const summary = daySalesSummary(sales, today, activeFilial);
+    if (!confirm(`Fechar o dia de hoje?\n\n${summary.ticketCount} venda(s) · Total ${fmt(summary.totalRevenue)}\n\nSerá impresso o resumo na impressora térmica.`)) return;
+    setClosingDay(true);
+    try {
+      const companyInfo = getCompany();
+      const html = renderThermalDayCloseReceipt({
+        companyName: companyInfo.name,
+        filialName: filiais.length ? filialName(filiais, activeFilial) : undefined,
+        date: today,
+        closedAt: new Date().toISOString(),
+        closedBy: session?.username ?? "caixa",
+        tickets: summary.groups.map((group) => ({
+          time: new Date(group[0].date).toLocaleTimeString("pt-AO", { hour: "2-digit", minute: "2-digit" }),
+          total: fmt(group.reduce((a, s) => a + s.revenue, 0)),
+          items: group.length,
+        })),
+        ticketCount: summary.ticketCount,
+        totalUnits: summary.totalUnits,
+        totalRevenue: fmt(summary.totalRevenue),
+      });
+      await printThermalReceipt(html);
+      const r = closeCashierDay(today, activeFilial, session?.username ?? "caixa");
+      if (!r.ok) alert(r.error);
+    } finally {
+      setClosingDay(false);
+    }
   };
 
   const openEdit = (group: Sale[]) => {
@@ -103,171 +184,208 @@ export function Sales() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">Vendas</h2>
-        <button
-          className="btn-primary"
-          onClick={() => {
-            resetForm();
-            setFormOpen(true);
-          }}
-          disabled={products.length === 0}
-          title={products.length === 0 ? "Adicione produtos primeiro" : "Nova venda"}
-        >
-          + Nova venda
-        </button>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold">{isCaixa ? "Caixa — Vendas" : "Vendas"}</h2>
+          {isCaixa && (
+            <p className="text-xs text-muted-foreground">
+              {dayClosed
+                ? "Dia fechado — resumo disponível abaixo"
+                : "Registe vendas · no fim do dia clique Fechar dia"}
+              {filiais.length > 0 && ` · ${filialName(filiais, activeFilial)}`}
+            </p>
+          )}
+        </div>
+        <div className="flex gap-2">
+          {isCaixa && !dayClosed && (
+            <button className="btn-secondary" onClick={() => void closeDay()} disabled={closingDay}>
+              {closingDay ? "A fechar…" : "Fechar dia"}
+            </button>
+          )}
+          {!dayClosed && (
+            <button
+              className="btn-primary"
+              onClick={() => {
+                resetForm();
+                setFormOpen(true);
+              }}
+              disabled={products.length === 0}
+            >
+              + Nova venda
+            </button>
+          )}
+        </div>
       </div>
 
-      <Modal open={formOpen} onClose={() => setFormOpen(false)} title={editingDate ? "Editar venda" : "Registar venda"} size="xl">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <div className="flex rounded-lg border p-0.5" style={{ borderColor: "var(--border)" }}>
-            <button onClick={() => { setMode("single"); setItems([{ productId: "", qty: "", unitPrice: "" }]); }} className={`px-3 py-1 text-xs rounded-md ${mode === "single" ? "bg-primary text-primary-foreground" : ""}`}>Venda individual</button>
-            <button onClick={() => setMode("daily")} className={`px-3 py-1 text-xs rounded-md ${mode === "daily" ? "bg-primary text-primary-foreground" : ""}`}>Resumo diário</button>
+      <Modal open={formOpen} onClose={() => setFormOpen(false)} title={editingDate ? "Editar venda" : "Nova venda"} size="xl">
+        {!isCaixa && (
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <div className="flex rounded-lg border p-0.5" style={{ borderColor: "var(--border)" }}>
+              <button onClick={() => { setMode("single"); setItems([{ productId: "", qty: "", unitPrice: "" }]); }} className={`px-3 py-1 text-xs rounded-md ${mode === "single" ? "bg-primary text-primary-foreground" : ""}`}>Venda individual</button>
+              <button onClick={() => setMode("daily")} className={`px-3 py-1 text-xs rounded-md ${mode === "daily" ? "bg-primary text-primary-foreground" : ""}`}>Resumo diário</button>
+            </div>
           </div>
-        </div>
-            <div className="mb-3 flex flex-wrap gap-3">
+        )}
+        {!isCaixa && (
+          <div className="mb-3 flex flex-wrap gap-3">
+            <div>
+              <label className="label">Data</label>
+              <input type="date" className="input max-w-xs" value={date} onChange={(e) => setDate(e.target.value)} />
+            </div>
+            {filiais.length > 0 && (
               <div>
-                <label className="label">Data</label>
-                <input type="date" className="input max-w-xs" value={date} onChange={(e) => setDate(e.target.value)} />
-              </div>
-              {filiais.length > 0 && (
-                <div>
-                  <label className="label">Filial</label>
-                  <select className="input" value={filialId} onChange={(e) => setFilialId(e.target.value)}>
-                    <option value="">— sem filial —</option>
-                    {filiais.map((f) => (
-                      <option key={f.id} value={f.id}>{f.name}</option>
-                    ))}
-                  </select>
-                </div>
-              )}
-            </div>
-
-            <div className="space-y-2">
-              {items.map((it, i) => (
-                <div key={i} className="grid gap-2 sm:grid-cols-[2fr_1fr_1fr_auto]">
-                  <select className="input" value={it.productId} onChange={(e) => onPickProduct(i, e.target.value)}>
-                    <option value="">— produto —</option>
-                    {products.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {productPickLabel(p)} (stock: {p.stock}{p.salePrice ? ` · ${fmt(p.salePrice)}` : ""})
-                      </option>
-                    ))}
-                  </select>
-                  <input type="number" min={0} className="input" placeholder="Qtd" value={it.qty} onChange={(e) => setItem(i, { qty: e.target.value })} />
-                  <input type="number" min={0} className="input" placeholder="Preço venda" value={it.unitPrice} onChange={(e) => setItem(i, { unitPrice: e.target.value })} />
-                  {mode === "daily" ? (
-                    <button className="btn-ghost" onClick={() => removeItem(i)} disabled={items.length === 1}>×</button>
-                  ) : <span />}
-                </div>
-              ))}
-            </div>
-            {mode === "daily" && (
-              <button className="btn-secondary mt-2" onClick={addItem}>+ Adicionar produto</button>
-            )}
-
-            {preview.length > 0 && (
-              <div className="mt-4 rounded-lg border p-3 text-sm">
-                <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pré-visualização</div>
-                <ul className="space-y-1">
-                  {preview.map((p, i) => (
-                    <li key={i} className="flex justify-between">
-                      <span className={p.over ? "text-destructive" : ""}>
-                        {p.name} ({p.qty} un){p.over && " — excede stock!"}
-                      </span>
-                      <span className="tabular-nums">
-                        {fmt(p.revenue)} · <span className={p.profit >= 0 ? "text-emerald-600" : "text-destructive"}>lucro {fmt(p.profit)}</span>
-                      </span>
-                    </li>
+                <label className="label">Filial</label>
+                <select className="input" value={filialId} onChange={(e) => setFilialId(e.target.value)}>
+                  <option value="">— sem filial —</option>
+                  {filiais.map((f) => (
+                    <option key={f.id} value={f.id}>{f.name}</option>
                   ))}
-                </ul>
-                <div className="mt-2 flex justify-between border-t pt-2 font-semibold">
-                  <span>Total</span>
-                  <span className="tabular-nums">
-                    {fmt(totalRev)} · <span className={totalProfit >= 0 ? "text-emerald-600" : "text-destructive"}>{fmt(totalProfit)}</span>
-                  </span>
-                </div>
+                </select>
               </div>
             )}
+          </div>
+        )}
+
+        <div className="space-y-2">
+          {items.map((it, i) => (
+            <div key={i} className="grid gap-2 sm:grid-cols-[2fr_1fr_1fr_auto]">
+              <select className="input" value={it.productId} onChange={(e) => onPickProduct(i, e.target.value)}>
+                <option value="">— produto —</option>
+                {products.map((p) => (
+                  <option key={p.id} value={p.id}>
+                    {productPickLabel(p)} (stock: {p.stock}{p.salePrice ? ` · ${fmt(p.salePrice)}` : ""})
+                  </option>
+                ))}
+              </select>
+              <input type="number" min={0} className="input" placeholder="Qtd" value={it.qty} onChange={(e) => setItem(i, { qty: e.target.value })} />
+              <input type="number" min={0} className="input" placeholder="Preço venda" value={it.unitPrice} onChange={(e) => setItem(i, { unitPrice: e.target.value })} />
+              {!isCaixa && mode === "daily" ? (
+                <button className="btn-ghost" onClick={() => removeItem(i)} disabled={items.length === 1}>×</button>
+              ) : <span />}
+            </div>
+          ))}
+        </div>
+        {!isCaixa && mode === "daily" && (
+          <button className="btn-secondary mt-2" onClick={addItem}>+ Adicionar produto</button>
+        )}
+
+        {preview.length > 0 && (
+          <div className="mt-4 rounded-lg border p-3 text-sm">
+            <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pré-visualização</div>
+            <ul className="space-y-1">
+              {preview.map((p, i) => (
+                <li key={i} className="flex justify-between">
+                  <span className={p.over ? "text-destructive" : ""}>
+                    {p.name} ({p.qty} un){p.over && " — excede stock!"}
+                  </span>
+                  <span className="tabular-nums">
+                    {fmt(p.revenue)}
+                    {!isCaixa && <> · <span className={p.profit >= 0 ? "text-emerald-600" : "text-destructive"}>lucro {fmt(p.profit)}</span></>}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <div className="mt-2 flex justify-between border-t pt-2 font-semibold">
+              <span>Total</span>
+              <span className="tabular-nums">{fmt(totalRev)}</span>
+            </div>
+          </div>
+        )}
 
         <div className="mt-5 flex justify-end gap-2">
           <button className="btn-secondary" onClick={() => { setFormOpen(false); resetForm(); }}>Cancelar</button>
-          <button className="btn-primary" onClick={save} disabled={valid.length === 0}>
-            {editingDate ? "Guardar alterações" : "Guardar venda"}
+          <button className="btn-primary" onClick={() => void save()} disabled={valid.length === 0 || saving}>
+            {saving ? "A processar…" : editingDate ? "Guardar alterações" : "Finalizar venda"}
           </button>
         </div>
       </Modal>
 
-      <div className="card">
-        <h2 className="mb-4 text-base font-semibold">Histórico ({sales.length})</h2>
-        {sales.length === 0 ? (
-          <p className="py-8 text-center text-sm text-muted-foreground">Sem vendas.</p>
-        ) : (
-          <ul className="max-h-[520px] divide-y overflow-auto">
-            {groupSales(sales).map((group) => {
-              const first = group[0];
+      {isCaixa && dayClosed && daySummary && (
+        <div className="card">
+          <h2 className="mb-4 text-base font-semibold">Resumo do dia — {new Date(today).toLocaleDateString("pt-AO")}</h2>
+          <div className="mb-4 grid gap-3 sm:grid-cols-3">
+            <div className="rounded-lg border p-3" style={{ borderColor: "var(--border)" }}>
+              <div className="text-xs text-muted-foreground">Vendas</div>
+              <div className="text-xl font-bold">{daySummary.ticketCount}</div>
+            </div>
+            <div className="rounded-lg border p-3" style={{ borderColor: "var(--border)" }}>
+              <div className="text-xs text-muted-foreground">Unidades</div>
+              <div className="text-xl font-bold">{daySummary.totalUnits}</div>
+            </div>
+            <div className="rounded-lg border p-3" style={{ borderColor: "var(--border)" }}>
+              <div className="text-xs text-muted-foreground">Total</div>
+              <div className="text-xl font-bold text-[var(--primary)]">{fmt(daySummary.totalRevenue)}</div>
+            </div>
+          </div>
+          <ul className="divide-y">
+            {daySummary.groups.map((group) => {
               const total = group.reduce((a, s) => a + s.revenue, 0);
-              const profit = group.reduce((a, s) => a + s.profit, 0);
-              const units = group.reduce((a, s) => a + s.qty, 0);
               return (
-                <li key={first.date + first.id} className="py-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="text-sm">
-                      <div className="flex flex-wrap items-center gap-2 font-medium">
-                        Fatura · {new Date(first.date).toLocaleString("pt-AO")}
-                        {filiais.length > 0 && (
-                          <span className="pill" style={{ background: "color-mix(in oklab, var(--primary) 16%, transparent)", color: "var(--primary)" }}>🏪 {filialName(filiais, first.filialId)}</span>
-                        )}
-                      </div>
-                      <div className="text-xs text-muted-foreground">
-                        {group.length} produto(s) · {units} unidade(s)
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <div className="text-right">
-                        <div className="tabular-nums font-semibold">{fmt(total)}</div>
-                        <div className={`text-xs tabular-nums ${profit >= 0 ? "text-emerald-600" : "text-destructive"}`}>
-                          lucro {profit >= 0 ? "+" : ""}{fmt(profit)}
-                        </div>
-                      </div>
-                      <button
-                        onClick={() => openPrint(group)}
-                        className="btn-secondary text-xs"
-                        title="Imprimir fatura"
-                      >
-                        🖨 Fatura
-                      </button>
-                      <button
-                        onClick={() => openEdit(group)}
-                        className="btn-secondary text-xs"
-                        title="Editar venda"
-                      >
-                        ✎ Editar
-                      </button>
-                    </div>
-                  </div>
-                  <ul className="mt-2 grid gap-1 pl-2 text-xs text-muted-foreground">
-                    {group.map((s) => {
-                      const p = products.find((x) => x.id === s.productId);
-                      return (
-                        <li key={s.id} className="flex items-center justify-between">
-                          <span>• {p ? productPickLabel(p) : "—"}: {s.qty} × {fmt(s.unitPrice)}</span>
-                          <button
-                            onClick={() => confirm("Remover linha?") && removeSale(s.id)}
-                            className="text-muted-foreground hover:text-destructive"
-                          >
-                            remover
-                          </button>
-                        </li>
-                      );
-                    })}
-                  </ul>
+                <li key={group[0].date + group[0].id} className="flex justify-between py-2 text-sm">
+                  <span>{new Date(group[0].date).toLocaleTimeString("pt-AO")} · {group.length} item(ns)</span>
+                  <span className="font-semibold tabular-nums">{fmt(total)}</span>
                 </li>
               );
             })}
           </ul>
-        )}
-      </div>
+        </div>
+      )}
+
+      {!isCaixa && (
+        <div className="card">
+          <h2 className="mb-4 text-base font-semibold">Histórico ({sales.length})</h2>
+          {sales.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">Sem vendas.</p>
+          ) : (
+            <ul className="max-h-[520px] divide-y overflow-auto">
+              {groupSales(sales).map((group) => {
+                const first = group[0];
+                const total = group.reduce((a, s) => a + s.revenue, 0);
+                const profit = group.reduce((a, s) => a + s.profit, 0);
+                const units = group.reduce((a, s) => a + s.qty, 0);
+                return (
+                  <li key={first.date + first.id} className="py-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-sm">
+                        <div className="flex flex-wrap items-center gap-2 font-medium">
+                          Fatura · {new Date(first.date).toLocaleString("pt-AO")}
+                          {filiais.length > 0 && (
+                            <span className="pill" style={{ background: "color-mix(in oklab, var(--primary) 16%, transparent)", color: "var(--primary)" }}>🏪 {filialName(filiais, first.filialId)}</span>
+                          )}
+                        </div>
+                        <div className="text-xs text-muted-foreground">
+                          {group.length} produto(s) · {units} unidade(s)
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="text-right">
+                          <div className="tabular-nums font-semibold">{fmt(total)}</div>
+                          <div className={`text-xs tabular-nums ${profit >= 0 ? "text-emerald-600" : "text-destructive"}`}>
+                            lucro {profit >= 0 ? "+" : ""}{fmt(profit)}
+                          </div>
+                        </div>
+                        <button onClick={() => openPrint(group)} className="btn-secondary text-xs" title="Imprimir fatura">🖨 Fatura</button>
+                        <button onClick={() => openEdit(group)} className="btn-secondary text-xs" title="Editar venda">✎ Editar</button>
+                      </div>
+                    </div>
+                    <ul className="mt-2 grid gap-1 pl-2 text-xs text-muted-foreground">
+                      {group.map((s) => {
+                        const p = products.find((x) => x.id === s.productId);
+                        return (
+                          <li key={s.id} className="flex items-center justify-between">
+                            <span>• {p ? productPickLabel(p) : "—"}: {s.qty} × {fmt(s.unitPrice)}</span>
+                            <button onClick={() => confirm("Remover linha?") && removeSale(s.id)} className="text-muted-foreground hover:text-destructive">remover</button>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </div>
+      )}
 
       <PdfPreviewModal
         open={!!pdf}

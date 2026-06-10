@@ -18,6 +18,11 @@ declare global {
       install: () => void;
       onStatus: (cb: (payload: { status: string; version?: string; percent?: number; message?: string }) => void) => () => void;
     };
+    venomPrint?: {
+      thermal: (html: string, printerName?: string) => Promise<{ ok: boolean; error?: string }>;
+      getPrinter: () => Promise<string>;
+      setPrinter: (name: string) => Promise<string>;
+    };
   }
 }
 

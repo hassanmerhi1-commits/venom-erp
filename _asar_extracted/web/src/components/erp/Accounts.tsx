@@ -1,4 +1,4 @@
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { useAccounts } from "@/lib/accounts-store";
 import { fmt, productCode, productTitle, productPickLabel } from "@/lib/erp-store";
 
@@ -610,6 +610,12 @@ function Empresa({ acc }: { acc: Acc }) {
   const [phone, setPhone] = useState(acc.company.phone ?? "");
   const [address, setAddress] = useState(acc.company.address ?? "");
   const [saved, setSaved] = useState(false);
+  const [thermalPrinter, setThermalPrinter] = useState("");
+  const [printerSaved, setPrinterSaved] = useState(false);
+
+  useEffect(() => {
+    window.venomPrint?.getPrinter?.().then((p) => setThermalPrinter(p || "")).catch(() => {});
+  }, []);
 
   const [fName, setFName] = useState("");
   const [fLoc, setFLoc] = useState("");
@@ -670,6 +676,31 @@ function Empresa({ acc }: { acc: Acc }) {
           </div>
           <button className="btn-primary w-full" onClick={saveCompany}>{saved ? "Guardado ✓" : "Guardar"}</button>
         </div>
+        {typeof window !== "undefined" && window.venomPrint && (
+          <div className="mt-6 border-t pt-4" style={{ borderColor: "var(--border)" }}>
+            <h4 className="mb-2 text-sm font-semibold">Impressora térmica (caixa)</h4>
+            <p className="mb-3 text-xs text-muted-foreground">
+              Nome exacto da impressora no Windows (ex: XP80). Deixe vazio para usar a impressora predefinida.
+              A venda imprime automaticamente ao finalizar — sem janela de confirmação.
+            </p>
+            <input
+              className="input"
+              value={thermalPrinter}
+              onChange={(e) => setThermalPrinter(e.target.value)}
+              placeholder="XP80"
+            />
+            <button
+              className="btn-secondary mt-2 w-full"
+              onClick={async () => {
+                await window.venomPrint?.setPrinter?.(thermalPrinter.trim());
+                setPrinterSaved(true);
+                setTimeout(() => setPrinterSaved(false), 1500);
+              }}
+            >
+              {printerSaved ? "Impressora guardada ✓" : "Guardar impressora"}
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="card h-fit">

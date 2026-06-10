@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { dbRead, dbWrite } from "@/lib/db";
 
-export type Role = "admin" | "user";
+export type Role = "admin" | "user" | "caixa";
 export type User = { username: string; password: string; role: Role; createdAt: string };
 
 const USERS_KEY = "erp.users.v1";

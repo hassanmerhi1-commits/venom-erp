@@ -25,12 +25,18 @@ export function Erp() {
   const [appVersion, setAppVersion] = useState("");
   const [update, setUpdate] = useState<{ status: string; version?: string; percent?: number } | null>(null);
 
+  const isCaixa = session?.role === "caixa";
+
   useEffect(() => {
     const u = window.venomUpdater;
     if (!u) return;
     u.getVersion().then(setAppVersion).catch(() => {});
     return u.onStatus(setUpdate);
   }, []);
+
+  useEffect(() => {
+    if (isCaixa) setTab("sales");
+  }, [isCaixa]);
 
   const onCheckUpdate = async () => {
     const u = window.venomUpdater;
@@ -57,15 +63,17 @@ export function Erp() {
 
   if (!session) return <Login />;
 
-  const TABS: { id: Tab; label: string }[] = [
-    { id: "dashboard", label: "Dashboard" },
-    { id: "products", label: "Produtos" },
-    { id: "purchases", label: "Compras" },
-    { id: "sales", label: "Vendas" },
-    { id: "reports", label: "Relatórios" },
-    { id: "contas", label: "Contas" },
-    ...(session.role === "admin" ? [{ id: "users" as Tab, label: "Utilizadores" }] : []),
-  ];
+  const TABS: { id: Tab; label: string }[] = isCaixa
+    ? [{ id: "sales", label: "Caixa" }]
+    : [
+        { id: "dashboard", label: "Dashboard" },
+        { id: "products", label: "Produtos" },
+        { id: "purchases", label: "Compras" },
+        { id: "sales", label: "Vendas" },
+        { id: "reports", label: "Relatórios" },
+        { id: "contas", label: "Contas" },
+        ...(session.role === "admin" ? [{ id: "users" as Tab, label: "Utilizadores" }] : []),
+      ];
 
   const onImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -100,13 +108,14 @@ export function Erp() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <input ref={fileRef} type="file" accept=".db,.json,application/json" className="hidden" onChange={onImport} />
+            {!isCaixa && <input ref={fileRef} type="file" accept=".db,.json,application/json" className="hidden" onChange={onImport} />}
             {filiais.length > 0 && (
               <select
                 className="input h-9 max-w-[170px] py-1 text-xs"
                 value={company.currentFilialId ?? ""}
                 onChange={(e) => setCurrentFilial(e.target.value || undefined)}
-                title="Filial ativa — novas vendas e compras são associadas a esta filial"
+                title="Filial ativa"
+                disabled={isCaixa}
               >
                 <option value="">— sem filial —</option>
                 {filiais.map((f) => (
@@ -114,27 +123,25 @@ export function Erp() {
                 ))}
               </select>
             )}
-            <button className="btn-ghost" onClick={onCheckUpdate} title="Verificar atualizações">↻ Atualizar</button>
-            <button className="btn-ghost" onClick={toggleTheme} title={theme === "dark" ? "Mudar para tema claro" : "Mudar para tema escuro"}>
-              {theme === "dark" ? "☀" : "🌙"}
-            </button>
-            <button className="btn-ghost" onClick={() => fileRef.current?.click()} title="Importar uma base venom.db">↥ Importar</button>
-            <button className="btn-secondary" onClick={exportDb} title="Guardar a base em ficheiro venom.db">↧ Exportar .db</button>
-            {info.native && (
-              <button
-                className="btn-ghost"
-                onClick={onChangePath}
-                title={`Base de dados: ${info.path}\n(clique para mudar localização)`}
-              >
-                🗄 BD
-              </button>
-            )}
-            {info.native && (
-              <button className="btn-ghost" onClick={dbReveal} title="Abrir pasta da base de dados">📂</button>
+            {!isCaixa && (
+              <>
+                <button className="btn-ghost" onClick={onCheckUpdate} title="Verificar atualizações">↻ Atualizar</button>
+                <button className="btn-ghost" onClick={toggleTheme} title={theme === "dark" ? "Mudar para tema claro" : "Mudar para tema escuro"}>
+                  {theme === "dark" ? "☀" : "🌙"}
+                </button>
+                <button className="btn-ghost" onClick={() => fileRef.current?.click()} title="Importar uma base venom.db">↥ Importar</button>
+                <button className="btn-secondary" onClick={exportDb} title="Guardar a base em ficheiro venom.db">↧ Exportar .db</button>
+                {info.native && (
+                  <button className="btn-ghost" onClick={onChangePath} title={`Base de dados: ${info.path}`}>🗄 BD</button>
+                )}
+                {info.native && (
+                  <button className="btn-ghost" onClick={dbReveal} title="Abrir pasta da base de dados">📂</button>
+                )}
+              </>
             )}
             <div className="ml-2 hidden items-center gap-2 sm:flex">
               <span className="pill" style={{ background: "var(--muted)", color: "var(--muted-foreground)" }}>
-                {session.username} · {session.role}
+                {session.username} · {isCaixa ? "caixa" : session.role}
               </span>
               <button className="btn-ghost" onClick={() => { if (confirm("Terminar sessão?")) logout(); }}>Sair</button>
             </div>
