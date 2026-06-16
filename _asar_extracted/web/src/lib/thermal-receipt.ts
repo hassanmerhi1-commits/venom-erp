@@ -54,7 +54,7 @@ export function renderThermalSaleReceipt(data: ThermalSaleReceipt): string {
     })
     .join("");
 
-  const headerName = data.companyName.trim() || "VENOM ERP";
+  const headerName = data.companyName.trim() || data.filialName?.trim() || "VENOM ERP";
 
   return `<!doctype html>
 <html lang="pt">
@@ -144,7 +144,7 @@ export type ThermalDayCloseReceipt = {
 };
 
 export function renderThermalDayCloseReceipt(data: ThermalDayCloseReceipt): string {
-  const headerName = data.companyName.trim() || "VENOM ERP";
+  const headerName = data.companyName.trim() || data.filialName?.trim() || "VENOM ERP";
   const ticketLines = data.tickets
     .map(
       (t) => `

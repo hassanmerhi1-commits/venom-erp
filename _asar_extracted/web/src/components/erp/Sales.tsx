@@ -111,7 +111,7 @@ export function Sales() {
         recordSale(stamp, valid, saleFilial);
         const companyInfo = getCompany();
         await printThermalSaleCopies({
-          companyName: companyInfo.name,
+          companyName: companyInfo.name?.trim() || (filiais.length ? filialName(filiais, saleFilial) : ""),
           companyPhone: companyInfo.phone,
           filialName: filiais.length ? filialName(filiais, saleFilial) : undefined,
           dateISO: stamp,
@@ -138,7 +138,7 @@ export function Sales() {
     try {
       const companyInfo = getCompany();
       const html = renderThermalDayCloseReceipt({
-        companyName: companyInfo.name,
+        companyName: companyInfo.name?.trim() || (filiais.length ? filialName(filiais, activeFilial) : ""),
         filialName: filiais.length ? filialName(filiais, activeFilial) : undefined,
         date: today,
         closedAt: new Date().toISOString(),

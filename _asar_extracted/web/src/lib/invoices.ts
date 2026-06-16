@@ -1,7 +1,9 @@
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import type { Product, Sale, Purchase } from "./erp-store";
-import { fmt, productTitle } from "./erp-store";
+import { fmt, productPickLabel } from "./erp-store";
+import { getCompany, filialName, type Filial } from "./accounts-store";
+import { dbRead } from "./db";
 
 const BRAND: [number, number, number] = [56, 163, 216];
 const GOLD: [number, number, number] = [212, 175, 55];
@@ -9,7 +11,27 @@ const INK: [number, number, number] = [20, 20, 20];
 const MUTED: [number, number, number] = [110, 120, 115];
 const LINE: [number, number, number] = [225, 232, 228];
 
-function header(doc: jsPDF, kind: "VENDA" | "COMPRA", number: string, dateISO: string) {
+type InvoiceIssuer = {
+  name: string;
+  phone?: string;
+  address?: string;
+  filial?: string;
+};
+
+function readIssuer(filialId?: string): InvoiceIssuer {
+  const company = getCompany();
+  const filiais = dbRead<Filial[]>("erp.filiais.v1", []);
+  const filial = filialId ? filialName(filiais, filialId) : undefined;
+  const name = company.name?.trim() || filial || "VENOM ERP";
+  return {
+    name,
+    phone: company.phone?.trim() || undefined,
+    address: company.address?.trim() || undefined,
+    filial: company.name?.trim() && filial && filial !== "Geral" ? filial : undefined,
+  };
+}
+
+function header(doc: jsPDF, kind: "VENDA" | "COMPRA", number: string, dateISO: string, issuer: InvoiceIssuer) {
   const w = doc.internal.pageSize.getWidth();
   doc.setFillColor(...BRAND);
   doc.rect(0, 0, w, 28, "F");
@@ -18,11 +40,12 @@ function header(doc: jsPDF, kind: "VENDA" | "COMPRA", number: string, dateISO: s
 
   doc.setTextColor(255, 255, 255);
   doc.setFont("helvetica", "bold");
-  doc.setFontSize(18);
-  doc.text("VENOM ERP", 14, 13);
+  doc.setFontSize(issuer.name.length > 28 ? 14 : 18);
+  doc.text(issuer.name, 14, 13);
   doc.setFont("helvetica", "normal");
   doc.setFontSize(9);
-  doc.text("Gestão de Stock · Vendas · Compras", 14, 20);
+  const sub = [issuer.filial, issuer.phone, issuer.address].filter(Boolean).join(" · ") || "Gestão de Stock · Vendas · Compras";
+  doc.text(sub.slice(0, 72), 14, 20);
   doc.setFontSize(8);
   doc.text("Emitido: " + new Date().toLocaleString("pt-AO"), w - 14, 13, { align: "right" });
 
@@ -111,6 +134,7 @@ function renderInvoiceHtml({
   title,
   number,
   dateISO,
+  issuer,
   rows,
   totals,
   signatures,
@@ -119,6 +143,7 @@ function renderInvoiceHtml({
   title: string;
   number: string;
   dateISO: string;
+  issuer: InvoiceIssuer;
   rows: Array<{ index: number; product: string; qty: string; unitPrice: string; total: string; extra?: string }>;
   totals: Array<{ label: string; value: string; strong?: boolean }>;
   signatures: [string, string];
@@ -302,8 +327,8 @@ function renderInvoiceHtml({
   <body>
     <main class="page">
       <section class="hero">
-        <h1>VENOM ERP</h1>
-        <p>Gestão de Stock · Vendas · Compras</p>
+        <h1>${escapeHtml(issuer.name)}</h1>
+        <p>${escapeHtml([issuer.filial, issuer.phone, issuer.address].filter(Boolean).join(" · ") || "Gestão de Stock · Vendas · Compras")}</p>
       </section>
       <section class="content">
         <div class="topbar">
@@ -369,9 +394,10 @@ function invoiceNumber(prefix: "FV" | "FC", dateISO: string, id: string) {
 export function printSaleInvoice(group: Sale[], products: Product[]): PdfResult | null {
   if (group.length === 0) return null;
   const first = group[0];
+  const issuer = readIssuer(first.filialId);
   const doc = new jsPDF();
   const number = invoiceNumber("FV", first.date, first.id);
-  const startY = header(doc, "VENDA", number, first.date);
+  const startY = header(doc, "VENDA", number, first.date, issuer);
 
   const totalQty = group.reduce((a, s) => a + s.qty, 0);
   const totalRev = group.reduce((a, s) => a + s.revenue, 0);
@@ -385,7 +411,7 @@ export function printSaleInvoice(group: Sale[], products: Product[]): PdfResult 
       const p = products.find((x) => x.id === s.productId);
       return [
         String(i + 1),
-        p ? productTitle(p) : "—",
+        p ? productPickLabel(p) : "—",
         String(s.qty),
         fmt(s.unitPrice),
         fmt(s.revenue),
@@ -425,16 +451,17 @@ export function printSaleInvoice(group: Sale[], products: Product[]): PdfResult 
   doc.text("Assinatura do Vendedor", 55, sigY + 5, { align: "center" });
   doc.text("Assinatura do Cliente", 155, sigY + 5, { align: "center" });
 
-  footer(doc, "VENOM ERP · Fatura de Venda");
+  footer(doc, `${issuer.name} · Fatura de Venda`);
   const html = renderInvoiceHtml({
     title: "FATURA DE VENDA",
     number,
     dateISO: first.date,
+    issuer,
     rows: group.map((s, i) => {
       const p = products.find((x) => x.id === s.productId);
       return {
         index: i + 1,
-        product: p ? productTitle(p) : "—",
+        product: p ? productPickLabel(p) : "—",
         qty: String(s.qty),
         unitPrice: fmt(s.unitPrice),
         total: fmt(s.revenue),
@@ -449,16 +476,17 @@ export function printSaleInvoice(group: Sale[], products: Product[]): PdfResult 
       { label: "TOTAL A PAGAR", value: fmt(totalRev), strong: true },
     ],
     signatures: ["Assinatura do Vendedor", "Assinatura do Cliente"],
-    note: "VENOM ERP · Fatura de Venda",
+    note: `${issuer.name} · Fatura de Venda`,
   });
   return buildPdf(doc, `${number}.pdf`, html);
 }
 
 /* ============ FATURA DE COMPRA ============ */
 export function printPurchaseInvoice(purchase: Purchase, products: Product[]): PdfResult {
+  const issuer = readIssuer(purchase.filialId);
   const doc = new jsPDF();
   const number = invoiceNumber("FC", purchase.date, purchase.id);
-  const startY = header(doc, "COMPRA", number, purchase.date);
+  const startY = header(doc, "COMPRA", number, purchase.date, issuer);
 
   const subtotal = purchase.lines.reduce((a, l) => a + l.qty * l.unitPrice, 0);
   const totalUnits = purchase.lines.reduce((a, l) => a + l.qty, 0);
@@ -470,7 +498,7 @@ export function printPurchaseInvoice(purchase: Purchase, products: Product[]): P
       const p = products.find((x) => x.id === l.productId);
       return [
         String(i + 1),
-        p ? productTitle(p) : "—",
+        p ? productPickLabel(p) : "—",
         String(l.qty),
         fmt(l.unitPrice),
         fmt(l.qty * l.unitPrice),
@@ -511,16 +539,17 @@ export function printPurchaseInvoice(purchase: Purchase, products: Product[]): P
   doc.text("Assinatura do Comprador", 55, sigY + 5, { align: "center" });
   doc.text("Assinatura do Fornecedor", 155, sigY + 5, { align: "center" });
 
-  footer(doc, "VENOM ERP · Fatura de Compra (Arquivo)");
+  footer(doc, `${issuer.name} · Fatura de Compra (Arquivo)`);
   const html = renderInvoiceHtml({
     title: "FATURA DE COMPRA",
     number,
     dateISO: purchase.date,
+    issuer,
     rows: purchase.lines.map((l, i) => {
       const p = products.find((x) => x.id === l.productId);
       return {
         index: i + 1,
-        product: p ? productTitle(p) : "—",
+        product: p ? productPickLabel(p) : "—",
         qty: String(l.qty),
         unitPrice: fmt(l.unitPrice),
         total: fmt(l.qty * l.unitPrice),
@@ -535,7 +564,7 @@ export function printPurchaseInvoice(purchase: Purchase, products: Product[]): P
       { label: "TOTAL", value: fmt(purchase.total), strong: true },
     ],
     signatures: ["Assinatura do Comprador", "Assinatura do Fornecedor"],
-    note: "VENOM ERP · Fatura de Compra (Arquivo)",
+    note: `${issuer.name} · Fatura de Compra (Arquivo)`,
   });
   return buildPdf(doc, `${number}.pdf`, html);
 }
