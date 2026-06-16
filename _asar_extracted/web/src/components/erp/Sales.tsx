@@ -38,6 +38,7 @@ export function Sales() {
   const [date, setDate] = useState(today);
   const [filialId, setFilialId] = useState<string>(company.currentFilialId ?? "");
   const [customerName, setCustomerName] = useState("");
+  const [items, setItems] = useState<Item[]>([{ productId: "", qty: "", unitPrice: "" }]);
   const [formOpen, setFormOpen] = useState(false);
   const [editingDate, setEditingDate] = useState<string | null>(null);
   const [pdf, setPdf] = useState<PdfResult | null>(null);
