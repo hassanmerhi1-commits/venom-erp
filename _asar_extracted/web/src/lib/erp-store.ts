@@ -42,6 +42,7 @@ export type Sale = {
   revenue: number;
   profit: number;
   filialId?: string; // branch this sale belongs to
+  customerName?: string; // buyer name on invoice
 };
 
 const KEYS = {
@@ -165,10 +166,16 @@ export function useErp() {
       write(KEYS.products, nextProducts);
       write(KEYS.purchases, [full, ...read<Purchase[]>(KEYS.purchases, [])]);
     },
-    recordSale: (date: string, items: Array<{ productId: string; qty: number; unitPrice: number }>, filialId?: string) => {
+    recordSale: (
+      date: string,
+      items: Array<{ productId: string; qty: number; unitPrice: number }>,
+      filialId?: string,
+      customerName?: string,
+    ) => {
       const products = read<Product[]>(KEYS.products, []);
       const sales = read<Sale[]>(KEYS.sales, []);
       const saleFilial = filialId ?? currentFilialId();
+      const buyer = customerName?.trim() || undefined;
       const productsCopy = [...products];
       const newSales: Sale[] = [];
       for (const it of items) {
@@ -186,6 +193,7 @@ export function useErp() {
           revenue: it.qty * it.unitPrice,
           profit: (it.unitPrice - unitCost) * it.qty,
           filialId: saleFilial,
+          customerName: buyer,
         };
         newSales.push(sale);
         productsCopy[idx] = { ...p, stock: Math.max(0, p.stock - it.qty) };
@@ -228,12 +236,14 @@ export function useErp() {
       date: string,
       items: Array<{ productId: string; qty: number; unitPrice: number }>,
       filialId?: string,
+      customerName?: string,
     ) => {
       const salesList = read<Sale[]>(KEYS.sales, []);
       const remaining = salesList.filter((s) => s.date !== groupDate);
       const base = read<Product[]>(KEYS.products, []);
       const purchasesList = read<Purchase[]>(KEYS.purchases, []);
       const costs = avgCostMap(purchasesList, base);
+      const buyer = customerName?.trim() || undefined;
       const newSales: Sale[] = items.map((it) => {
         const unitCost = costs.get(it.productId) ?? 0;
         return {
@@ -246,6 +256,7 @@ export function useErp() {
           revenue: it.qty * it.unitPrice,
           profit: (it.unitPrice - unitCost) * it.qty,
           filialId,
+          customerName: buyer,
         };
       });
       const nextSales = [...newSales, ...remaining];

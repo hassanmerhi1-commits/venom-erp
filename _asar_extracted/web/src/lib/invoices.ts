@@ -135,6 +135,7 @@ function renderInvoiceHtml({
   number,
   dateISO,
   issuer,
+  customerName,
   rows,
   totals,
   signatures,
@@ -144,6 +145,7 @@ function renderInvoiceHtml({
   number: string;
   dateISO: string;
   issuer: InvoiceIssuer;
+  customerName?: string;
   rows: Array<{ index: number; product: string; qty: string; unitPrice: string; total: string; extra?: string }>;
   totals: Array<{ label: string; value: string; strong?: boolean }>;
   signatures: [string, string];
@@ -334,6 +336,7 @@ function renderInvoiceHtml({
         <div class="topbar">
           <div>
             <h2 class="title">${escapeHtml(title)}</h2>
+            ${customerName ? `<div style="font-size:15px;font-weight:700;margin:6px 0 4px">Cliente: ${escapeHtml(customerName)}</div>` : ""}
             <div style="font-size:13px;color:var(--muted)">Emitido: ${escapeHtml(new Date().toLocaleString("pt-AO"))}</div>
           </div>
           <div class="meta">
@@ -395,9 +398,17 @@ export function printSaleInvoice(group: Sale[], products: Product[]): PdfResult 
   if (group.length === 0) return null;
   const first = group[0];
   const issuer = readIssuer(first.filialId);
+  const customer = first.customerName?.trim();
   const doc = new jsPDF();
   const number = invoiceNumber("FV", first.date, first.id);
-  const startY = header(doc, "VENDA", number, first.date, issuer);
+  let startY = header(doc, "VENDA", number, first.date, issuer);
+  if (customer) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(...INK);
+    doc.text(`Cliente: ${customer}`, 14, startY - 2);
+    startY += 8;
+  }
 
   const totalQty = group.reduce((a, s) => a + s.qty, 0);
   const totalRev = group.reduce((a, s) => a + s.revenue, 0);
@@ -457,6 +468,7 @@ export function printSaleInvoice(group: Sale[], products: Product[]): PdfResult 
     number,
     dateISO: first.date,
     issuer,
+    customerName: customer,
     rows: group.map((s, i) => {
       const p = products.find((x) => x.id === s.productId);
       return {

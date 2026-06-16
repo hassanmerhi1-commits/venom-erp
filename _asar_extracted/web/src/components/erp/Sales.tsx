@@ -37,7 +37,7 @@ export function Sales() {
 
   const [date, setDate] = useState(today);
   const [filialId, setFilialId] = useState<string>(company.currentFilialId ?? "");
-  const [items, setItems] = useState<Item[]>([{ productId: "", qty: "", unitPrice: "" }]);
+  const [customerName, setCustomerName] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [editingDate, setEditingDate] = useState<string | null>(null);
   const [pdf, setPdf] = useState<PdfResult | null>(null);
@@ -89,6 +89,7 @@ export function Sales() {
 
   const resetForm = () => {
     setItems([{ productId: "", qty: "", unitPrice: "" }]);
+    setCustomerName("");
     setFilialId(company.currentFilialId ?? "");
     setDate(today);
     setEditingDate(null);
@@ -105,15 +106,17 @@ export function Sales() {
     try {
       const stamp = localDateTimeISO(isCaixa ? today : date);
       const saleFilial = isCaixa ? activeFilial : filialId || undefined;
+      const buyer = customerName.trim() || undefined;
       if (editingDate) {
-        updateSaleGroup(editingDate, stamp, valid, saleFilial);
+        updateSaleGroup(editingDate, stamp, valid, saleFilial, buyer);
       } else {
-        recordSale(stamp, valid, saleFilial);
+        recordSale(stamp, valid, saleFilial, buyer);
         const companyInfo = getCompany();
         await printThermalSaleCopies({
           companyName: companyInfo.name?.trim() || (filiais.length ? filialName(filiais, saleFilial) : ""),
           companyPhone: companyInfo.phone,
           filialName: filiais.length ? filialName(filiais, saleFilial) : undefined,
+          customerName: buyer,
           dateISO: stamp,
           receiptNo: thermalReceiptNumber(stamp),
           items: valid.map((it) => ({
@@ -164,6 +167,7 @@ export function Sales() {
     setEditingDate(group[0].date);
     setDate(group[0].date.slice(0, 10));
     setFilialId(group[0].filialId ?? "");
+    setCustomerName(group[0].customerName ?? "");
     setItems(group.map((s) => ({ productId: s.productId, qty: String(s.qty), unitPrice: String(s.unitPrice) })));
     setFormOpen(true);
   };
@@ -214,6 +218,15 @@ export function Sales() {
       </div>
 
       <Modal open={formOpen} onClose={() => setFormOpen(false)} title={editingDate ? "Editar venda" : "Nova venda"} size="xl">
+        <div className="mb-3">
+          <label className="label">Nome do cliente</label>
+          <input
+            className="input"
+            value={customerName}
+            onChange={(e) => setCustomerName(e.target.value)}
+            placeholder="Ex: João Silva (opcional)"
+          />
+        </div>
         {!isCaixa && (
           <div className="mb-3 flex flex-wrap gap-3">
             <div>
@@ -338,6 +351,7 @@ export function Sales() {
                           )}
                         </div>
                         <div className="text-xs text-muted-foreground">
+                          {first.customerName ? <>Cliente: {first.customerName} · </> : null}
                           {group.length} produto(s) · {units} unidade(s)
                         </div>
                       </div>

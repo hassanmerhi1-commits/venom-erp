@@ -14,6 +14,7 @@ export type ThermalSaleReceipt = {
   dateISO: string;
   receiptNo: string;
   items: ThermalSaleItem[];
+  customerName?: string;
   /** ORIGINAL = cliente, DUPLICATA = gerente */
   copyLabel?: "ORIGINAL" | "DUPLICATA";
 };
@@ -114,6 +115,7 @@ export function renderThermalSaleReceipt(data: ThermalSaleReceipt): string {
   <div class="center bold">FATURA DE VENDA</div>
   <div class="muted">Nº ${escapeHtml(data.receiptNo)}</div>
   <div class="muted">${escapeHtml(when)}</div>
+  ${data.customerName ? `<div class="bold" style="margin-top:4px">Cliente: ${escapeHtml(data.customerName)}</div>` : ""}
   <hr class="rule" />
   <table>${lines}</table>
   <hr class="rule" />
