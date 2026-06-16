@@ -1,6 +1,7 @@
 import { dbRead, dbWrite } from "@/lib/db";
 import type { Sale } from "@/lib/erp-store";
 import { groupSales } from "@/lib/invoices";
+import { localDateKey } from "@/lib/erp-store";
 
 const KEY = "erp.cashier-days.v1";
 
@@ -16,7 +17,7 @@ function readCloses(): CashierDayClose[] {
 }
 
 export function todayISO() {
-  return new Date().toISOString().slice(0, 10);
+  return localDateKey();
 }
 
 export function isDayClosed(date: string, filialId?: string): boolean {
@@ -43,7 +44,7 @@ export function closeCashierDay(date: string, filialId: string | undefined, clos
 
 export function salesForDay(sales: Sale[], date: string, filialId?: string) {
   const fid = filialId ?? "";
-  return sales.filter((s) => s.date.slice(0, 10) === date && (s.filialId ?? "") === fid);
+  return sales.filter((s) => localDateKey(new Date(s.date)) === date && (s.filialId ?? "") === fid);
 }
 
 export function daySalesSummary(sales: Sale[], date: string, filialId?: string) {

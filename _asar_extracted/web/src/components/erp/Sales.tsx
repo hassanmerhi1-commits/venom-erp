@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useErp, fmt, type Sale, productPickLabel, productTitle } from "@/lib/erp-store";
+import { useErp, fmt, type Sale, productPickLabel, productTitle, localDateTimeISO } from "@/lib/erp-store";
 import { useAccounts, filialName, getCompany } from "@/lib/accounts-store";
 import { useAuth } from "@/lib/auth";
 import { printSaleInvoice, groupSales, type PdfResult } from "@/lib/invoices";
@@ -16,7 +16,6 @@ import {
 } from "@/lib/cashier-day";
 import { Modal, PdfPreviewModal } from "./Modal";
 
-type Mode = "single" | "daily";
 type Item = { productId: string; qty: string; unitPrice: string };
 
 export function Sales() {
@@ -36,7 +35,6 @@ export function Sales() {
   const dayClosed = isCaixa && isDayClosed(today, activeFilial);
   const daySummary = isCaixa ? daySalesSummary(sales, today, activeFilial) : null;
 
-  const [mode, setMode] = useState<Mode>("single");
   const [date, setDate] = useState(today);
   const [filialId, setFilialId] = useState<string>(company.currentFilialId ?? "");
   const [items, setItems] = useState<Item[]>([{ productId: "", qty: "", unitPrice: "" }]);
@@ -93,7 +91,6 @@ export function Sales() {
     setItems([{ productId: "", qty: "", unitPrice: "" }]);
     setFilialId(company.currentFilialId ?? "");
     setDate(today);
-    setMode("single");
     setEditingDate(null);
   };
 
@@ -106,7 +103,7 @@ export function Sales() {
     if (anyOver && !confirm("Algumas linhas excedem o stock. Continuar mesmo assim?")) return;
     setSaving(true);
     try {
-      const stamp = new Date(`${isCaixa ? today : date}T${new Date().toISOString().slice(11, 19)}`).toISOString();
+      const stamp = localDateTimeISO(isCaixa ? today : date);
       const saleFilial = isCaixa ? activeFilial : filialId || undefined;
       if (editingDate) {
         updateSaleGroup(editingDate, stamp, valid, saleFilial);
@@ -165,7 +162,6 @@ export function Sales() {
 
   const openEdit = (group: Sale[]) => {
     setEditingDate(group[0].date);
-    setMode(group.length > 1 ? "daily" : "single");
     setDate(group[0].date.slice(0, 10));
     setFilialId(group[0].filialId ?? "");
     setItems(group.map((s) => ({ productId: s.productId, qty: String(s.qty), unitPrice: String(s.unitPrice) })));
@@ -219,14 +215,6 @@ export function Sales() {
 
       <Modal open={formOpen} onClose={() => setFormOpen(false)} title={editingDate ? "Editar venda" : "Nova venda"} size="xl">
         {!isCaixa && (
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <div className="flex rounded-lg border p-0.5" style={{ borderColor: "var(--border)" }}>
-              <button onClick={() => { setMode("single"); setItems([{ productId: "", qty: "", unitPrice: "" }]); }} className={`px-3 py-1 text-xs rounded-md ${mode === "single" ? "bg-primary text-primary-foreground" : ""}`}>Venda individual</button>
-              <button onClick={() => setMode("daily")} className={`px-3 py-1 text-xs rounded-md ${mode === "daily" ? "bg-primary text-primary-foreground" : ""}`}>Resumo diário</button>
-            </div>
-          </div>
-        )}
-        {!isCaixa && (
           <div className="mb-3 flex flex-wrap gap-3">
             <div>
               <label className="label">Data</label>
@@ -259,15 +247,11 @@ export function Sales() {
               </select>
               <input type="number" min={0} className="input" placeholder="Qtd" value={it.qty} onChange={(e) => setItem(i, { qty: e.target.value })} />
               <input type="number" min={0} className="input" placeholder="Preço venda" value={it.unitPrice} onChange={(e) => setItem(i, { unitPrice: e.target.value })} />
-              {!isCaixa && mode === "daily" ? (
-                <button className="btn-ghost" onClick={() => removeItem(i)} disabled={items.length === 1}>×</button>
-              ) : <span />}
+              <button className="btn-ghost" onClick={() => removeItem(i)} disabled={items.length === 1} title="Remover linha">×</button>
             </div>
           ))}
         </div>
-        {!isCaixa && mode === "daily" && (
-          <button className="btn-secondary mt-2" onClick={addItem}>+ Adicionar produto</button>
-        )}
+        <button className="btn-secondary mt-2" onClick={addItem}>+ Adicionar produto</button>
 
         {preview.length > 0 && (
           <div className="mt-4 rounded-lg border p-3 text-sm">

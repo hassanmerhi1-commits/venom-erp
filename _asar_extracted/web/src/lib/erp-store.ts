@@ -302,8 +302,22 @@ export function monthRange(ym: string) {
   return { start, end };
 }
 
+export function localDateKey(d = new Date()) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 export function todayKey() {
-  return new Date().toISOString().slice(0, 10);
+  return localDateKey();
+}
+
+/** Date key (YYYY-MM-DD) + current local clock time, stored as ISO UTC. */
+export function localDateTimeISO(dateKey: string) {
+  const now = new Date();
+  const [y, m, d] = dateKey.split("-").map(Number);
+  return new Date(y, m - 1, d, now.getHours(), now.getMinutes(), now.getSeconds(), now.getMilliseconds()).toISOString();
 }
 
 export function isSameDay(iso: string, dayKey: string) {
