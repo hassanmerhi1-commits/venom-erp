@@ -112,6 +112,30 @@ function mergeProductsFromFilial(local: Product[], incoming: Product[]): { merge
   return { merged: [...byId.values()], added };
 }
 
+function remapPurchaseProductIds(purchases: Purchase[], idMap: Map<string, string>): Purchase[] {
+  return purchases.map((pu) => ({
+    ...pu,
+    lines: pu.lines.map((l) => {
+      const mapped = idMap.get(l.productId);
+      return mapped && mapped !== l.productId ? { ...l, productId: mapped } : l;
+    }),
+  }));
+}
+
+/** Map incoming (matriz) product ids to local filial ids after catalog merge. */
+function buildMainProductIdMap(merged: Product[], incoming: Product[]): Map<string, string> {
+  const byCode = new Map(merged.map((p) => [normCode(p.name), p.id]));
+  const map = new Map<string, string>();
+  for (const ip of incoming) {
+    if (merged.some((p) => p.id === ip.id)) map.set(ip.id, ip.id);
+    else {
+      const localId = byCode.get(normCode(ip.name));
+      map.set(ip.id, localId ?? ip.id);
+    }
+  }
+  return map;
+}
+
 function remapSalesProductIds(sales: Sale[], idMap: Map<string, string>): Sale[] {
   return sales.map((s) => {
     const mapped = idMap.get(s.productId);
@@ -175,11 +199,15 @@ export function mergeFromMain(payload: SyncPayload): SyncResult | SyncError {
     localProducts,
     incomingProducts,
   );
+  const mainProductIdMap = buildMainProductIdMap(products, incomingProducts);
 
   const purchaseIds = new Set(localPurchases.map((p) => p.id));
-  const purchasesToAdd = localFilialId
-    ? incomingPurchases.filter((p) => !purchaseIds.has(p.id) && (p.filialId ?? "") === localFilialId)
-    : [];
+  const purchasesToAdd = remapPurchaseProductIds(
+    localFilialId
+      ? incomingPurchases.filter((p) => !purchaseIds.has(p.id) && (p.filialId ?? "") === localFilialId)
+      : [],
+    mainProductIdMap,
+  );
   const purchases = [...localPurchases, ...purchasesToAdd];
 
   const filiais = mergeFiliais(localFiliais, incomingFiliais);
