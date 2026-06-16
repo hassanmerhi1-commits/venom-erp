@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { dbRead, dbWrite, dbExportAll, dbImportAll, dbClearKeys } from "./db";
+import { mergeFromMain, mergeFromFilial, parseSyncPayload } from "./db-sync";
 export { dbInfo, dbChangePath, dbReveal } from "./db";
 
 export type Product = {
@@ -62,7 +63,7 @@ function currentFilialId(): string | undefined {
 // Recompute every product's stock + weighted-average cost from the full history.
 // Purchases (chronological) build up stock & avgCost; sales only reduce stock.
 // Used after any edit/delete so totals always stay consistent.
-function computeProducts(base: Product[], purchases: Purchase[], sales: Sale[]): Product[] {
+export function computeProducts(base: Product[], purchases: Purchase[], sales: Sale[]): Product[] {
   const map = new Map(base.map((p) => [p.id, { ...p, stock: 0, avgCost: 0 }]));
   const sortedPurchases = [...purchases].sort((a, b) => a.date.localeCompare(b.date));
   for (const pu of sortedPurchases) {
@@ -342,12 +343,42 @@ export function exportDb() {
 export async function importDb(file: File): Promise<{ ok: true } | { ok: false; error: string }> {
   try {
     const text = await file.text();
-    const data = JSON.parse(text);
-    if (data?.app !== "VENOM-ERP") return { ok: false, error: "Ficheiro não é uma base VENOM ERP." };
+    const parsed = parseSyncPayload(JSON.parse(text));
+    if ("error" in parsed) return { ok: false, error: parsed.error };
     const incoming: Record<string, unknown> = {};
-    for (const k of DB_KEYS) if (data[k] !== undefined) incoming[k] = data[k] ?? [];
+    for (const k of DB_KEYS) if (parsed[k] !== undefined) incoming[k] = parsed[k] ?? [];
     dbImportAll(incoming);
     return { ok: true };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
+export async function importFromMain(
+  file: File,
+): Promise<{ ok: true; summary: string } | { ok: false; error: string }> {
+  try {
+    const text = await file.text();
+    const parsed = parseSyncPayload(JSON.parse(text));
+    if ("error" in parsed) return { ok: false, error: parsed.error };
+    const r = mergeFromMain(parsed);
+    if (!r.ok) return r;
+    return { ok: true, summary: r.summary };
+  } catch (e) {
+    return { ok: false, error: (e as Error).message };
+  }
+}
+
+export async function importFromFilial(
+  file: File,
+): Promise<{ ok: true; summary: string } | { ok: false; error: string }> {
+  try {
+    const text = await file.text();
+    const parsed = parseSyncPayload(JSON.parse(text));
+    if ("error" in parsed) return { ok: false, error: parsed.error };
+    const r = mergeFromFilial(parsed);
+    if (!r.ok) return r;
+    return { ok: true, summary: r.summary };
   } catch (e) {
     return { ok: false, error: (e as Error).message };
   }

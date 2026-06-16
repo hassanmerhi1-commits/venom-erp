@@ -99,9 +99,26 @@ export function dbExportAll(): Record<string, unknown> {
   return out;
 }
 
+export function dbSaveBatch(updates: Record<string, unknown>) {
+  if (hasNative()) {
+    const c = loadCache();
+    for (const [k, v] of Object.entries(updates)) c[k] = v;
+    window.venomDb!.save(c);
+  } else if (typeof window !== "undefined") {
+    for (const [k, v] of Object.entries(updates)) {
+      window.localStorage.setItem(k, JSON.stringify(v));
+    }
+  }
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent("erp:change", { detail: "import" }));
+  }
+}
+
+/** Full replace of exported ERP keys — preserves users and other local keys. */
 export function dbImportAll(state: Record<string, unknown>) {
   if (hasNative()) {
-    cache = { ...state };
+    const c = loadCache();
+    cache = { ...c, ...state };
     window.venomDb!.save(cache);
   } else if (typeof window !== "undefined") {
     for (const [k, v] of Object.entries(state)) {

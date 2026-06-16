@@ -7,7 +7,7 @@ import { Reports } from "./Reports";
 import { Users } from "./Users";
 import { Accounts } from "./Accounts";
 import { Login } from "./Login";
-import { exportDb, importDb, dbInfo, dbChangePath, dbReveal } from "@/lib/erp-store";
+import { exportDb, importDb, importFromMain, importFromFilial, dbInfo, dbChangePath, dbReveal } from "@/lib/erp-store";
 import { useAuth, logout } from "@/lib/auth";
 import { useAccounts } from "@/lib/accounts-store";
 import venomIcon from "@/assets/venom-icon.png";
@@ -18,7 +18,9 @@ export function Erp() {
   const { session } = useAuth();
   const { filiais, company, setCurrentFilial } = useAccounts();
   const [tab, setTab] = useState<Tab>("dashboard");
-  const fileRef = useRef<HTMLInputElement>(null);
+  const fileMainRef = useRef<HTMLInputElement>(null);
+  const fileFilialRef = useRef<HTMLInputElement>(null);
+  const fileReplaceRef = useRef<HTMLInputElement>(null);
   const [theme, setTheme] = useState<"light" | "dark">(() =>
     typeof document !== "undefined" && document.documentElement.classList.contains("dark") ? "dark" : "light",
   );
@@ -75,13 +77,31 @@ export function Erp() {
         ...(session.role === "admin" ? [{ id: "users" as Tab, label: "Utilizadores" }] : []),
       ];
 
-  const onImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const onImportReplace = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     e.target.value = "";
     if (!f) return;
-    if (!confirm("Importar irá substituir os dados atuais. Continuar?")) return;
+    if (!confirm("Substituir irá apagar os dados ERP actuais e usar o ficheiro completo. Utilizadores locais mantêm-se. Continuar?")) return;
     const r = await importDb(f);
-    alert(r.ok ? "Base importada com sucesso." : `Falha: ${r.error}`);
+    alert(r.ok ? "Base substituída com sucesso." : `Falha: ${r.error}`);
+  };
+
+  const onImportFromMain = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f) return;
+    if (!confirm("Importar da matriz: actualiza produtos, preços e compras de stock para esta filial. As vendas locais NÃO são apagadas. Continuar?")) return;
+    const r = await importFromMain(f);
+    alert(r.ok ? r.summary : `Falha: ${r.error}`);
+  };
+
+  const onImportFromFilial = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f) return;
+    if (!confirm("Importar da filial: adiciona vendas da filial à matriz. Os dados da matriz NÃO são apagados. Continuar?")) return;
+    const r = await importFromFilial(f);
+    alert(r.ok ? r.summary : `Falha: ${r.error}`);
   };
 
   const info = dbInfo();
@@ -108,7 +128,13 @@ export function Erp() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {!isCaixa && <input ref={fileRef} type="file" accept=".db,.json,application/json" className="hidden" onChange={onImport} />}
+            {!isCaixa && (
+              <>
+                <input ref={fileMainRef} type="file" accept=".db,.json,application/json" className="hidden" onChange={onImportFromMain} />
+                <input ref={fileFilialRef} type="file" accept=".db,.json,application/json" className="hidden" onChange={onImportFromFilial} />
+                <input ref={fileReplaceRef} type="file" accept=".db,.json,application/json" className="hidden" onChange={onImportReplace} />
+              </>
+            )}
             {filiais.length > 0 && (
               <select
                 className="input h-9 max-w-[170px] py-1 text-xs"
@@ -129,8 +155,18 @@ export function Erp() {
                 <button className="btn-ghost" onClick={toggleTheme} title={theme === "dark" ? "Mudar para tema claro" : "Mudar para tema escuro"}>
                   {theme === "dark" ? "☀" : "🌙"}
                 </button>
-                <button className="btn-ghost" onClick={() => fileRef.current?.click()} title="Importar uma base venom.db">↥ Importar</button>
+                <button className="btn-ghost" onClick={() => fileMainRef.current?.click()} title="Filial: receber produtos, preços e stock da matriz (não apaga vendas locais)">
+                  ↥ Matriz
+                </button>
+                <button className="btn-ghost" onClick={() => fileFilialRef.current?.click()} title="Matriz: receber vendas da filial (não apaga dados da matriz)">
+                  ↥ Filial
+                </button>
                 <button className="btn-secondary" onClick={exportDb} title="Guardar a base em ficheiro venom.db">↧ Exportar .db</button>
+                {session.role === "admin" && (
+                  <button className="btn-ghost opacity-70" onClick={() => fileReplaceRef.current?.click()} title="Substituir tudo (restaurar backup completo — perigoso)">
+                    ⚠ Substituir
+                  </button>
+                )}
                 {info.native && (
                   <button className="btn-ghost" onClick={onChangePath} title={`Base de dados: ${info.path}`}>🗄 BD</button>
                 )}
