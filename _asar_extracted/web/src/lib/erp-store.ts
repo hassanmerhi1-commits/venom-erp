@@ -324,6 +324,12 @@ export function todayKey() {
   return localDateKey();
 }
 
+/** Format YYYY-MM-DD for display using local calendar (avoids UTC date-only parse shift). */
+export function formatLocalDateKey(dateKey: string) {
+  const [y, m, d] = dateKey.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("pt-AO");
+}
+
 /** Date key (YYYY-MM-DD) + current local clock time, stored as ISO UTC. */
 export function localDateTimeISO(dateKey: string) {
   const now = new Date();

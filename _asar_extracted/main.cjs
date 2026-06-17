@@ -253,13 +253,22 @@ function dlog(...args) {
   try { fs.appendFileSync(DEBUG_LOG, new Date().toISOString() + "  " + args.join(" ") + "\n"); } catch {}
 }
 
+function appIconPath() {
+  const candidates = app.isPackaged
+    ? [path.join(process.resourcesPath, "icon.ico")]
+    : [path.join(__dirname, "build", "icon.ico")];
+  return candidates.find((p) => fs.existsSync(p));
+}
+
 function createWindow() {
+  const icon = appIconPath();
   mainWindow = new BrowserWindow({
     width: 1280,
     height: 820,
     minWidth: 900,
     minHeight: 600,
     title: "VENOM ERP",
+    icon,
     backgroundColor: "#e8f4fc",
     webPreferences: {
       contextIsolation: true,
@@ -286,6 +295,9 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  if (process.platform === "win32") {
+    app.setAppUserModelId("com.venom.erp");
+  }
   // Pre-create default DB so it's visible to the user
   ensureDb(getDbPath());
   createWindow();

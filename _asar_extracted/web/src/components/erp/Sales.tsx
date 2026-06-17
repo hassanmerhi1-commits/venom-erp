@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useErp, fmt, type Sale, productPickLabel, productTitle, localDateTimeISO } from "@/lib/erp-store";
+import { useErp, fmt, type Sale, productPickLabel, productTitle, localDateTimeISO, formatLocalDateKey } from "@/lib/erp-store";
 import { useAccounts, filialName, getCompany } from "@/lib/accounts-store";
 import { useAuth } from "@/lib/auth";
 import { printSaleInvoice, groupSales, type PdfResult } from "@/lib/invoices";
@@ -23,13 +23,29 @@ export function Sales() {
   const isCaixa = session?.role === "caixa";
   const { products, sales, recordSale, updateSaleGroup, removeSale } = useErp();
   const { filiais, company } = useAccounts();
-  const today = todayISO();
+  const [today, setToday] = useState(() => todayISO());
   const activeFilial = company.currentFilialId ?? "";
   const [dayTick, setDayTick] = useState(0);
   useEffect(() => {
-    const sync = () => setDayTick((n) => n + 1);
+    const refreshToday = () => setToday(todayISO());
+    const sync = () => {
+      setDayTick((n) => n + 1);
+      refreshToday();
+    };
+    refreshToday();
+    const timer = window.setInterval(refreshToday, 60_000);
     window.addEventListener("erp:change", sync);
-    return () => window.removeEventListener("erp:change", sync);
+    window.addEventListener("focus", refreshToday);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refreshToday();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener("erp:change", sync);
+      window.removeEventListener("focus", refreshToday);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, []);
   void dayTick;
   const dayClosed = isCaixa && isDayClosed(today, activeFilial);
@@ -92,7 +108,7 @@ export function Sales() {
     setItems([{ productId: "", qty: "", unitPrice: "" }]);
     setCustomerName("");
     setFilialId(company.currentFilialId ?? "");
-    setDate(today);
+    setDate(todayISO());
     setEditingDate(null);
   };
 
@@ -105,7 +121,8 @@ export function Sales() {
     if (anyOver && !confirm("Algumas linhas excedem o stock. Continuar mesmo assim?")) return;
     setSaving(true);
     try {
-      const stamp = localDateTimeISO(isCaixa ? today : date);
+      const saleDate = isCaixa ? todayISO() : date;
+      const stamp = localDateTimeISO(saleDate);
       const saleFilial = isCaixa ? activeFilial : filialId || undefined;
       const buyer = customerName.trim() || undefined;
       if (editingDate) {
@@ -136,7 +153,8 @@ export function Sales() {
 
   const closeDay = async () => {
     if (!isCaixa || dayClosed || closingDay) return;
-    const summary = daySalesSummary(sales, today, activeFilial);
+    const saleDate = todayISO();
+    const summary = daySalesSummary(sales, saleDate, activeFilial);
     if (!confirm(`Fechar o dia de hoje?\n\n${summary.ticketCount} venda(s) · Total ${fmt(summary.totalRevenue)}\n\nSerá impresso o resumo na impressora térmica.`)) return;
     setClosingDay(true);
     try {
@@ -144,7 +162,7 @@ export function Sales() {
       const html = renderThermalDayCloseReceipt({
         companyName: companyInfo.name?.trim() || (filiais.length ? filialName(filiais, activeFilial) : ""),
         filialName: filiais.length ? filialName(filiais, activeFilial) : undefined,
-        date: today,
+        date: saleDate,
         closedAt: new Date().toISOString(),
         closedBy: session?.username ?? "caixa",
         tickets: summary.groups.map((group) => ({
@@ -157,7 +175,7 @@ export function Sales() {
         totalRevenue: fmt(summary.totalRevenue),
       });
       await printThermalReceipt(html);
-      const r = closeCashierDay(today, activeFilial, session?.username ?? "caixa");
+      const r = closeCashierDay(saleDate, activeFilial, session?.username ?? "caixa");
       if (!r.ok) alert(r.error);
     } finally {
       setClosingDay(false);
@@ -190,6 +208,8 @@ export function Sales() {
           <h2 className="text-lg font-semibold">{isCaixa ? "Caixa — Vendas" : "Vendas"}</h2>
           {isCaixa && (
             <p className="text-xs text-muted-foreground">
+              {formatLocalDateKey(today)}
+              {" · "}
               {dayClosed
                 ? "Dia fechado — resumo disponível abaixo"
                 : "Registe vendas · no fim do dia clique Fechar dia"}
@@ -300,7 +320,7 @@ export function Sales() {
 
       {isCaixa && dayClosed && daySummary && (
         <div className="card">
-          <h2 className="mb-4 text-base font-semibold">Resumo do dia — {new Date(today).toLocaleDateString("pt-AO")}</h2>
+          <h2 className="mb-4 text-base font-semibold">Resumo do dia — {formatLocalDateKey(today)}</h2>
           <div className="mb-4 grid gap-3 sm:grid-cols-3">
             <div className="rounded-lg border p-3" style={{ borderColor: "var(--border)" }}>
               <div className="text-xs text-muted-foreground">Vendas</div>
