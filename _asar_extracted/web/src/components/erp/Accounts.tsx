@@ -1,8 +1,8 @@
 import { Fragment, useEffect, useState } from "react";
-import { useAccounts } from "@/lib/accounts-store";
+import { useAccounts, filialName, computeFilialStockQty, productFilialQty } from "@/lib/accounts-store";
 import { fmt, productCode, productTitle, productPickLabel } from "@/lib/erp-store";
 
-type Section = "caixa" | "fornecedores" | "fretes" | "stock" | "empresa";
+type Section = "caixa" | "fornecedores" | "fretes" | "stock" | "transferencias" | "empresa";
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -16,6 +16,7 @@ export function Accounts() {
     { id: "caixa", label: "Caixa" },
     { id: "fornecedores", label: "Fornecedores" },
     { id: "stock", label: "Stock" },
+    { id: "transferencias", label: "Transferências" },
     { id: "fretes", label: "Fretes" },
   ];
 
@@ -52,6 +53,7 @@ export function Accounts() {
       {section === "caixa" && <Caixa acc={acc} filialFilter={filialFilter} />}
       {section === "fornecedores" && <Fornecedores acc={acc} />}
       {section === "stock" && <Stock acc={acc} filialFilter={filialFilter} />}
+      {section === "transferencias" && <Transferencias acc={acc} />}
       {section === "fretes" && <Fretes acc={acc} />}
       {section === "empresa" && <Empresa acc={acc} />}
     </div>
@@ -558,41 +560,326 @@ function Fretes({ acc }: { acc: Acc }) {
 function Stock({ acc, filialFilter }: { acc: Acc; filialFilter: string }) {
   const scope =
     filialFilter === "all" ? "todas as filiais" : filialFilter === "none" ? "registos sem filial" : acc.filiais.find((f) => f.id === filialFilter)?.name ?? "filial";
+  const showMatrix = filialFilter === "all" && acc.filiais.length > 1;
+  const hasUnlabeled = acc.products.some((p) => (acc.filialStockMatrix.unlabeled.get(p.id) ?? 0) !== 0);
+
+  const matrixRows = showMatrix
+    ? acc.products
+        .map((product) => {
+          const perFilial = acc.filiais.map((f) => ({
+            filial: f,
+            qty: productFilialQty(acc.filialStockMatrix, f.id, product.id),
+          }));
+          const unlabeled = acc.filialStockMatrix.unlabeled.get(product.id) ?? 0;
+          const total = perFilial.reduce((a, x) => a + x.qty, 0) + unlabeled;
+          return { product, perFilial, unlabeled, total };
+        })
+        .filter((r) => r.total !== 0)
+        .sort((a, b) => b.total * b.product.avgCost - a.total * a.product.avgCost)
+    : [];
+
+  const filialSummaries = showMatrix
+    ? acc.filiais.map((f) => {
+        let units = 0;
+        let value = 0;
+        for (const p of acc.products) {
+          const q = productFilialQty(acc.filialStockMatrix, f.id, p.id);
+          if (q !== 0) {
+            units += q;
+            value += q * p.avgCost;
+          }
+        }
+        return { filial: f, units, value };
+      })
+    : [];
+
   return (
     <div className="space-y-6">
-      <div className="grid gap-4 sm:grid-cols-2">
-        <StatCard label="Valor do stock (custo)" value={fmt(acc.stockValue)} big />
-        <StatCard label="Unidades em stock" value={String(acc.stockUnits)} />
+      {showMatrix && (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {filialSummaries.map(({ filial, units, value }) => (
+            <StatCard
+              key={filial.id}
+              label={`Stock · ${filial.name}`}
+              value={`${units} un · ${fmt(value)}`}
+              big={acc.filiais.length <= 3}
+            />
+          ))}
+        </div>
+      )}
+
+      {!showMatrix && (
+        <div className="grid gap-4 sm:grid-cols-2">
+          <StatCard label="Valor do stock (custo)" value={fmt(acc.stockValue)} big />
+          <StatCard label="Unidades em stock" value={String(acc.stockUnits)} />
+        </div>
+      )}
+
+      {showMatrix ? (
+        <div className="card">
+          <h3 className="mb-1 text-base font-semibold">Stock por produto e filial</h3>
+          <p className="mb-3 text-xs text-muted-foreground">
+            Vista completa — cada coluna é o stock nessa loja (compras − vendas ± transferências).
+          </p>
+          {matrixRows.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">Sem stock registado nas filiais.</p>
+          ) : (
+            <div className="max-h-[520px] overflow-auto">
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-[var(--card)]">
+                  <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
+                    <th className="py-2 pr-2">Produto</th>
+                    {acc.filiais.map((f) => (
+                      <th key={f.id} className="py-2 px-2 text-right whitespace-nowrap">
+                        {f.name}
+                        {acc.company.currentFilialId === f.id && " ★"}
+                      </th>
+                    ))}
+                    {hasUnlabeled && <th className="py-2 px-2 text-right">Sem filial</th>}
+                    <th className="py-2 pl-2 text-right">Total</th>
+                    <th className="py-2 pl-2 text-right">Valor</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {matrixRows.map(({ product, perFilial, unlabeled, total }) => (
+                    <tr key={product.id} className="border-b last:border-0">
+                      <td className="py-2 pr-2">
+                        <div className="font-medium">{productTitle(product)}</div>
+                        {product.sku && product.name && <div className="text-xs font-mono text-muted-foreground">{productCode(product)}</div>}
+                      </td>
+                      {perFilial.map(({ filial, qty }) => (
+                        <td key={filial.id} className={`py-2 px-2 text-right tabular-nums ${qty < 0 ? "text-destructive" : qty === 0 ? "text-muted-foreground" : ""}`}>
+                          {qty}
+                        </td>
+                      ))}
+                      {hasUnlabeled && <td className="py-2 px-2 text-right tabular-nums text-muted-foreground">{unlabeled || "—"}</td>}
+                      <td className="py-2 pl-2 text-right tabular-nums font-medium">{total}</td>
+                      <td className="py-2 pl-2 text-right tabular-nums">{fmt(total * product.avgCost)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="card">
+          <h3 className="mb-1 text-base font-semibold">Stock por produto</h3>
+          <p className="mb-3 text-xs text-muted-foreground">
+            Calculado a partir das compras, vendas e transferências atribuídas a <b>{scope}</b>.
+          </p>
+          {acc.stockStats.length === 0 ? (
+            <p className="py-6 text-center text-sm text-muted-foreground">Sem movimento de stock para esta filial.</p>
+          ) : (
+            <div className="max-h-[460px] overflow-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
+                    <th className="py-2 pr-2">Produto</th>
+                    <th className="py-2 pr-2 text-right">Quantidade</th>
+                    <th className="py-2 pr-2 text-right">Custo médio</th>
+                    <th className="py-2 pr-2 text-right">Valor</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {acc.stockStats.map(({ product, qty, value }) => (
+                    <tr key={product.id} className="border-b last:border-0">
+                      <td className="py-2 pr-2">
+                        <div className="font-medium">{productTitle(product)}</div>
+                        {product.sku && product.name && <div className="text-xs font-mono text-muted-foreground">{productCode(product)}</div>}
+                      </td>
+                      <td className={`py-2 pr-2 text-right tabular-nums ${qty < 0 ? "text-destructive" : ""}`}>{qty}</td>
+                      <td className="py-2 pr-2 text-right tabular-nums text-muted-foreground">{fmt(product.avgCost)}</td>
+                      <td className="py-2 pr-2 text-right tabular-nums font-medium">{fmt(value)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------- Transferências entre filiais ----------------
+type TransferLine = { productId: string; qty: string };
+
+function Transferencias({ acc }: { acc: Acc }) {
+  const [fromId, setFromId] = useState(acc.company.currentFilialId ?? acc.filiais[0]?.id ?? "");
+  const [toId, setToId] = useState(() => {
+    const start = acc.company.currentFilialId ?? acc.filiais[0]?.id ?? "";
+    return acc.filiais.find((f) => f.id !== start)?.id ?? "";
+  });
+  const [date, setDate] = useState(today());
+  const [note, setNote] = useState("");
+  const [lines, setLines] = useState<TransferLine[]>([{ productId: "", qty: "" }]);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const setLine = (i: number, patch: Partial<TransferLine>) =>
+    setLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
+  const addLine = () => setLines((ls) => [...ls, { productId: "", qty: "" }]);
+  const removeLine = (i: number) => setLines((ls) => ls.filter((_, idx) => idx !== i));
+
+  const validLines = lines
+    .map((l) => ({ productId: l.productId, qty: parseFloat(l.qty) || 0 }))
+    .filter((l) => l.productId && l.qty > 0);
+
+  const stockAtFrom = fromId
+    ? computeFilialStockQty(fromId, acc.purchases, acc.sales, acc.transfers)
+    : new Map<string, number>();
+
+  const resetForm = () => {
+    setLines([{ productId: "", qty: "" }]);
+    setNote("");
+    setDate(today());
+    setErr(null);
+  };
+
+  const submit = () => {
+    setErr(null);
+    setMsg(null);
+    const r = acc.addTransfer(fromId, toId, validLines, new Date(date).toISOString(), note);
+    if (!r.ok) {
+      setErr(r.error ?? "Erro");
+      return;
+    }
+    setMsg("Transferência registada.");
+    resetForm();
+  };
+
+  if (acc.filiais.length < 2) {
+    return (
+      <div className="card">
+        <h3 className="mb-2 text-base font-semibold">Transferências entre filiais</h3>
+        <p className="text-sm text-muted-foreground">Crie pelo menos duas filiais em Empresa / Filiais para mover stock de uma loja para outra.</p>
+      </div>
+    );
+  }
+
+  const fromOptions = acc.filiais.filter((f) => f.id !== toId);
+  const toOptions = acc.filiais.filter((f) => f.id !== fromId);
+
+  return (
+    <div className="space-y-6">
+      <div className="card">
+        <h3 className="mb-1 text-base font-semibold">Mover stock entre lojas</h3>
+        <p className="mb-4 text-xs text-muted-foreground">
+          Envia produtos de uma filial para outra. Baixa stock na origem e aumenta no destino. Sem custo de transporte.
+        </p>
+        {err && <div className="mb-3 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">{err}</div>}
+        {msg && <div className="mb-3 rounded-md border border-emerald-500/40 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-600">{msg}</div>}
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div>
+            <label className="label">De (origem)</label>
+            <select className="input" value={fromId} onChange={(e) => setFromId(e.target.value)}>
+              {fromOptions.map((f) => (
+                <option key={f.id} value={f.id}>{f.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="label">Para (destino)</label>
+            <select className="input" value={toId} onChange={(e) => setToId(e.target.value)}>
+              <option value="">— escolher —</option>
+              {toOptions.map((f) => (
+                <option key={f.id} value={f.id}>{f.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="label">Data</label>
+            <input type="date" className="input" value={date} onChange={(e) => setDate(e.target.value)} />
+          </div>
+          <div>
+            <label className="label">Nota (opcional)</label>
+            <input className="input" placeholder="Ex: reabastecer loja 2" value={note} onChange={(e) => setNote(e.target.value)} />
+          </div>
+        </div>
+
+        <div className="mt-4 space-y-2">
+          <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Produtos</div>
+          {lines.map((l, i) => {
+            const avail = l.productId ? (stockAtFrom.get(l.productId) ?? 0) : 0;
+            const over = l.productId && (parseFloat(l.qty) || 0) > avail;
+            return (
+              <div key={i}>
+                <div className="grid gap-2 sm:grid-cols-[2fr_1fr_auto]">
+                  <select className="input" value={l.productId} onChange={(e) => setLine(i, { productId: e.target.value })}>
+                    <option value="">— produto —</option>
+                    {acc.products.map((p) => {
+                      const q = stockAtFrom.get(p.id) ?? 0;
+                      return (
+                        <option key={p.id} value={p.id} disabled={q <= 0}>
+                          {productPickLabel(p)} (stock origem: {q})
+                        </option>
+                      );
+                    })}
+                  </select>
+                  <input type="number" min={0} className="input" placeholder="Qtd" value={l.qty} onChange={(e) => setLine(i, { qty: e.target.value })} />
+                  {lines.length > 1 && (
+                    <button type="button" className="btn-secondary text-xs" onClick={() => removeLine(i)}>Remover</button>
+                  )}
+                </div>
+                {over && <p className="mt-1 text-xs text-destructive">Excede stock na origem ({avail} disponível).</p>}
+              </div>
+            );
+          })}
+          <button type="button" className="btn-secondary text-xs" onClick={addLine}>+ Produto</button>
+        </div>
+
+        <div className="mt-4 flex flex-wrap gap-2">
+          <button className="btn-primary" onClick={submit} disabled={!fromId || !toId || validLines.length === 0}>
+            Registar transferência
+          </button>
+        </div>
       </div>
 
       <div className="card">
-        <h3 className="mb-1 text-base font-semibold">Stock por produto</h3>
-        <p className="mb-3 text-xs text-muted-foreground">
-          Calculado a partir das compras e vendas atribuídas a <b>{scope}</b>. Entradas = compras, saídas = vendas.
-        </p>
-        {acc.stockStats.length === 0 ? (
-          <p className="py-6 text-center text-sm text-muted-foreground">Sem movimento de stock para esta filial.</p>
+        <h3 className="mb-3 text-base font-semibold">Histórico ({acc.transfers.length})</h3>
+        {acc.transfers.length === 0 ? (
+          <p className="py-6 text-center text-sm text-muted-foreground">Sem transferências registadas.</p>
         ) : (
           <div className="max-h-[460px] overflow-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b text-left text-xs uppercase tracking-wide text-muted-foreground">
-                  <th className="py-2 pr-2">Produto</th>
-                  <th className="py-2 pr-2 text-right">Quantidade</th>
-                  <th className="py-2 pr-2 text-right">Custo médio</th>
-                  <th className="py-2 pr-2 text-right">Valor</th>
+                  <th className="py-2 pr-2">Data</th>
+                  <th className="py-2 pr-2">De → Para</th>
+                  <th className="py-2 pr-2">Produtos</th>
+                  <th className="py-2 pr-2">Nota</th>
+                  <th className="py-2"></th>
                 </tr>
               </thead>
               <tbody>
-                {acc.stockStats.map(({ product, qty, value }) => (
-                  <tr key={product.id} className="border-b last:border-0">
+                {[...acc.transfers].sort((a, b) => b.date.localeCompare(a.date)).map((t) => (
+                  <tr key={t.id} className="border-b last:border-0">
+                    <td className="py-2 pr-2 whitespace-nowrap text-muted-foreground">{new Date(t.date).toLocaleDateString("pt-AO")}</td>
                     <td className="py-2 pr-2">
-                      <div className="font-medium">{productTitle(product)}</div>
-                      {product.sku && product.name && <div className="text-xs font-mono text-muted-foreground">{productCode(product)}</div>}
+                      {filialName(acc.filiais, t.fromFilialId)} → {filialName(acc.filiais, t.toFilialId)}
                     </td>
-                    <td className={`py-2 pr-2 text-right tabular-nums ${qty < 0 ? "text-destructive" : ""}`}>{qty}</td>
-                    <td className="py-2 pr-2 text-right tabular-nums text-muted-foreground">{fmt(product.avgCost)}</td>
-                    <td className="py-2 pr-2 text-right tabular-nums font-medium">{fmt(value)}</td>
+                    <td className="py-2 pr-2">
+                      {t.lines.map((l, idx) => {
+                        const p = acc.products.find((x) => x.id === l.productId);
+                        return (
+                          <span key={idx}>
+                            {idx > 0 && ", "}
+                            {p ? productTitle(p) : "—"} × {l.qty}
+                          </span>
+                        );
+                      })}
+                    </td>
+                    <td className="py-2 pr-2 text-muted-foreground">{t.note ?? "—"}</td>
+                    <td className="py-2 text-right">
+                      <button
+                        className="text-xs text-muted-foreground hover:text-destructive"
+                        onClick={() => confirm("Remover esta transferência? O stock volta ao estado anterior.") && acc.removeTransfer(t.id)}
+                      >
+                        remover
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>

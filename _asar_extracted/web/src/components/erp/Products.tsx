@@ -1,14 +1,19 @@
 import { useState } from "react";
 import { useErp, fmt, productCode, productTitle, productPickLabel } from "@/lib/erp-store";
 import type { Product } from "@/lib/erp-store";
+import { useAccounts, productFilialQty, productTotalFilialQty } from "@/lib/accounts-store";
 import { Modal } from "./Modal";
 
 function EditProductModal({
   product,
+  filiais,
+  filialStockMatrix,
   onClose,
   onSave,
 }: {
   product: Product;
+  filiais: { id: string; name: string }[];
+  filialStockMatrix: ReturnType<typeof useAccounts>["filialStockMatrix"];
   onClose: () => void;
   onSave: (patch: Partial<Product>) => void;
 }) {
@@ -65,8 +70,10 @@ function EditProductModal({
         </div>
         <div className="grid grid-cols-3 gap-3 rounded-lg border p-3 text-xs" style={{ borderColor: "var(--border)" }}>
           <div>
-            <div className="text-muted-foreground">Stock atual</div>
-            <div className="text-sm font-semibold tabular-nums">{product.stock}</div>
+            <div className="text-muted-foreground">{filiais.length > 0 ? "Stock total" : "Stock atual"}</div>
+            <div className="text-sm font-semibold tabular-nums">
+              {filiais.length > 0 ? productTotalFilialQty(filialStockMatrix, filiais, product.id) : product.stock}
+            </div>
           </div>
           <div>
             <div className="text-muted-foreground">Custo médio</div>
@@ -77,6 +84,26 @@ function EditProductModal({
             <div className="text-sm font-semibold tabular-nums">{product.createdAt.slice(0, 10)}</div>
           </div>
         </div>
+        {filiais.length > 0 && (
+          <div className="rounded-lg border p-3 text-xs" style={{ borderColor: "var(--border)" }}>
+            <div className="mb-2 font-medium uppercase tracking-wide text-muted-foreground">Stock por filial</div>
+            <div className="flex flex-wrap gap-2">
+              {filiais.map((f) => {
+                const q = productFilialQty(filialStockMatrix, f.id, product.id);
+                return (
+                  <span key={f.id} className="pill" style={{ background: "var(--muted)", color: "var(--foreground)" }}>
+                    {f.name}: <b>{q}</b>
+                  </span>
+                );
+              })}
+              {(filialStockMatrix.unlabeled.get(product.id) ?? 0) !== 0 && (
+                <span className="pill" style={{ background: "color-mix(in oklab, var(--destructive) 12%, transparent)", color: "var(--destructive)" }}>
+                  Sem filial: <b>{filialStockMatrix.unlabeled.get(product.id)}</b>
+                </span>
+              )}
+            </div>
+          </div>
+        )}
         <div className="flex justify-end gap-2 pt-2">
           <button type="button" className="btn-secondary" onClick={onClose}>Cancelar</button>
           <button type="submit" className="btn-primary">Guardar alterações</button>
@@ -88,6 +115,9 @@ function EditProductModal({
 
 export function Products() {
   const { products, purchases, sales, addProduct, updateProduct, removeProduct } = useErp();
+  const { filiais, company, filialStockMatrix } = useAccounts("all");
+  const hasFiliais = filiais.length > 0;
+  const hasUnlabeledStock = products.some((p) => (filialStockMatrix.unlabeled.get(p.id) ?? 0) !== 0);
   const [name, setName] = useState("");
   const [sku, setSku] = useState("");
   const [lowStock, setLowStock] = useState("5");
@@ -209,7 +239,12 @@ export function Products() {
       {/* Bottom: products table */}
       <div className="card p-0 overflow-hidden">
         <div className="flex items-center justify-between px-5 py-4 border-b border-[var(--border)]">
-          <h2 className="text-base font-semibold">Stock de produtos</h2>
+          <div>
+            <h2 className="text-base font-semibold">Stock de produtos</h2>
+            {hasFiliais && (
+              <p className="mt-0.5 text-xs text-muted-foreground">Quantidades por filial — coluna Total soma todas as lojas.</p>
+            )}
+          </div>
           <span className="pill" style={{ background: "var(--muted)", color: "var(--muted-foreground)" }}>
             {products.length} {products.length === 1 ? "item" : "itens"}
           </span>
@@ -223,7 +258,24 @@ export function Products() {
                 <tr className="text-left text-[11px] uppercase tracking-wider text-muted-foreground" style={{ background: "var(--muted)" }}>
                   <th className="px-5 py-3 font-semibold">Código</th>
                   <th className="px-3 py-3 font-semibold">Produto</th>
-                  <th className="px-3 py-3 text-right font-semibold">Qtd. em armazém</th>
+                  {hasFiliais ? (
+                    <>
+                      {filiais.map((f) => (
+                        <th
+                          key={f.id}
+                          className="px-3 py-3 text-right font-semibold whitespace-nowrap"
+                          title={f.location}
+                        >
+                          {f.name}
+                          {company.currentFilialId === f.id && " ★"}
+                        </th>
+                      ))}
+                      {hasUnlabeledStock && <th className="px-3 py-3 text-right font-semibold">Sem filial</th>}
+                      <th className="px-3 py-3 text-right font-semibold">Total</th>
+                    </>
+                  ) : (
+                    <th className="px-3 py-3 text-right font-semibold">Qtd. em armazém</th>
+                  )}
                   <th className="px-3 py-3 text-right font-semibold">Preço venda</th>
                   <th className="px-3 py-3 text-right font-semibold">Custo médio</th>
                   <th className="px-3 py-3 text-right font-semibold">Lucro / un.</th>
@@ -234,7 +286,10 @@ export function Products() {
               </thead>
               <tbody>
                 {products.map((p, idx) => {
-                  const low = p.stock <= p.lowStock;
+                  const totalQty = hasFiliais ? productTotalFilialQty(filialStockMatrix, filiais, p.id) : p.stock;
+                  const low = hasFiliais
+                    ? filiais.some((f) => productFilialQty(filialStockMatrix, f.id, p.id) <= p.lowStock) || totalQty <= p.lowStock
+                    : p.stock <= p.lowStock;
                   const profit = (p.salePrice ?? 0) > 0 ? (p.salePrice as number) - p.avgCost : null;
                   const profitPct = profit !== null && p.avgCost > 0 ? (profit / p.avgCost) * 100 : null;
                   return (
@@ -245,14 +300,46 @@ export function Products() {
                     >
                       <td className="px-5 py-3 font-mono text-xs text-muted-foreground">{productCode(p) || "—"}</td>
                       <td className="px-3 py-3 font-medium">{productTitle(p)}</td>
-                      <td className="px-3 py-3 text-right tabular-nums">
-                        <span className={`pill ${low ? "" : ""}`} style={{
-                          background: low ? "color-mix(in oklab, var(--destructive) 18%, transparent)" : "color-mix(in oklab, var(--primary) 14%, transparent)",
-                          color: low ? "var(--destructive)" : "var(--primary)",
-                        }}>
-                          {p.stock}
-                        </span>
-                      </td>
+                      {hasFiliais ? (
+                        <>
+                          {filiais.map((f) => {
+                            const q = productFilialQty(filialStockMatrix, f.id, p.id);
+                            const filLow = q <= p.lowStock;
+                            return (
+                              <td key={f.id} className="px-3 py-3 text-right tabular-nums">
+                                <span
+                                  className="pill"
+                                  style={{
+                                    background: filLow
+                                      ? "color-mix(in oklab, var(--destructive) 18%, transparent)"
+                                      : q > 0
+                                        ? "color-mix(in oklab, var(--primary) 14%, transparent)"
+                                        : "var(--muted)",
+                                    color: filLow ? "var(--destructive)" : q > 0 ? "var(--primary)" : "var(--muted-foreground)",
+                                  }}
+                                >
+                                  {q}
+                                </span>
+                              </td>
+                            );
+                          })}
+                          {hasUnlabeledStock && (
+                            <td className="px-3 py-3 text-right tabular-nums text-muted-foreground">
+                              {filialStockMatrix.unlabeled.get(p.id) ?? 0}
+                            </td>
+                          )}
+                          <td className="px-3 py-3 text-right tabular-nums font-semibold">{totalQty}</td>
+                        </>
+                      ) : (
+                        <td className="px-3 py-3 text-right tabular-nums">
+                          <span className={`pill ${low ? "" : ""}`} style={{
+                            background: low ? "color-mix(in oklab, var(--destructive) 18%, transparent)" : "color-mix(in oklab, var(--primary) 14%, transparent)",
+                            color: low ? "var(--destructive)" : "var(--primary)",
+                          }}>
+                            {p.stock}
+                          </span>
+                        </td>
+                      )}
                       <td className="px-3 py-3 text-right tabular-nums">
                         {p.salePrice ? fmt(p.salePrice) : <span className="text-muted-foreground">—</span>}
                       </td>
@@ -333,11 +420,19 @@ export function Products() {
                 </select>
               </div>
               {selected && (
-                <div className="flex gap-4 text-sm">
+                <div className="flex flex-wrap gap-4 text-sm">
                   <div>
-                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Stock atual</div>
-                    <div className="font-semibold tabular-nums">{selected.stock}</div>
+                    <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{hasFiliais ? "Stock total" : "Stock atual"}</div>
+                    <div className="font-semibold tabular-nums">
+                      {hasFiliais ? productTotalFilialQty(filialStockMatrix, filiais, selected.id) : selected.stock}
+                    </div>
                   </div>
+                  {hasFiliais && filiais.map((f) => (
+                    <div key={f.id}>
+                      <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{f.name}</div>
+                      <div className="font-semibold tabular-nums">{productFilialQty(filialStockMatrix, f.id, selected.id)}</div>
+                    </div>
+                  ))}
                   <div>
                     <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Custo médio</div>
                     <div className="font-semibold tabular-nums">{fmt(selected.avgCost)}</div>
@@ -431,6 +526,8 @@ export function Products() {
         return (
           <EditProductModal
             product={p}
+            filiais={filiais}
+            filialStockMatrix={filialStockMatrix}
             onClose={() => setEditingId(null)}
             onSave={(patch) => updateProduct(p.id, patch)}
           />

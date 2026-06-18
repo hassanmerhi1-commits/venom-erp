@@ -355,6 +355,7 @@ const DB_KEYS = [
   "erp.cash.v1",
   "erp.payments.v1",
   "erp.freight.v1",
+  "erp.transfers.v1",
 ] as const;
 
 export function exportDb() {

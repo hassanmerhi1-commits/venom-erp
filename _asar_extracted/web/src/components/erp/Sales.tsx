@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useErp, fmt, type Sale, productPickLabel, productTitle, localDateTimeISO, formatLocalDateKey } from "@/lib/erp-store";
-import { useAccounts, filialName, getCompany } from "@/lib/accounts-store";
+import { useAccounts, filialName, getCompany, getFilialStockQty } from "@/lib/accounts-store";
 import { useAuth } from "@/lib/auth";
 import { printSaleInvoice, groupSales, type PdfResult } from "@/lib/invoices";
 import {
@@ -94,11 +94,14 @@ export function Sales() {
     }))
     .filter((it) => it.productId && it.qty > 0 && it.unitPrice >= 0);
 
+  const previewFilial = isCaixa ? activeFilial : filialId || undefined;
+
   const preview = valid.map((it) => {
     const p = products.find((x) => x.id === it.productId);
+    const stock = previewFilial && filiais.length > 0 ? getFilialStockQty(previewFilial, it.productId) : (p?.stock ?? 0);
     const revenue = it.qty * it.unitPrice;
     const profit = (it.unitPrice - (p?.avgCost ?? 0)) * it.qty;
-    return { name: p ? productTitle(p) : "—", stock: p?.stock ?? 0, qty: it.qty, revenue, profit, over: it.qty > (p?.stock ?? 0) };
+    return { name: p ? productTitle(p) : "—", stock, qty: it.qty, revenue, profit, over: it.qty > stock };
   });
   const totalRev = preview.reduce((a, p) => a + p.revenue, 0);
   const totalProfit = preview.reduce((a, p) => a + p.profit, 0);
@@ -275,7 +278,7 @@ export function Sales() {
                 <option value="">— produto —</option>
                 {products.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {productPickLabel(p)} (stock: {p.stock}{p.salePrice ? ` · ${fmt(p.salePrice)}` : ""})
+                    {productPickLabel(p)} (stock: {previewFilial && filiais.length > 0 ? getFilialStockQty(previewFilial, p.id) : p.stock}{p.salePrice ? ` · ${fmt(p.salePrice)}` : ""})
                   </option>
                 ))}
               </select>

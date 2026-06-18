@@ -7,6 +7,15 @@ export type Supplier = { id: string; name: string; phone?: string; note?: string
 export type CashEntry = { id: string; date: string; type: "in" | "out"; amount: number; note: string; filialId?: string };
 export type SupplierPayment = { id: string; supplierId: string; date: string; amount: number; note?: string; filialId?: string };
 export type FreightEntry = { id: string; date: string; transporter: string; amount: number; note?: string; filialId?: string };
+export type StockTransferLine = { productId: string; qty: number };
+export type StockTransfer = {
+  id: string;
+  date: string;
+  fromFilialId: string;
+  toFilialId: string;
+  lines: StockTransferLine[];
+  note?: string;
+};
 export type Company = { name: string; phone?: string; address?: string; currentFilialId?: string };
 
 const KEYS = {
@@ -16,11 +25,75 @@ const KEYS = {
   cash: "erp.cash.v1",
   payments: "erp.payments.v1",
   freight: "erp.freight.v1",
+  transfers: "erp.transfers.v1",
   // shared with erp-store
   products: "erp.products.v1",
   purchases: "erp.purchases.v1",
   sales: "erp.sales.v1",
 };
+
+/** Per-filial stock from purchases, sales and inter-filial transfers. */
+export function computeFilialStockQty(
+  filialId: string,
+  purchases: Purchase[],
+  sales: Sale[],
+  transfers: StockTransfer[],
+): Map<string, number> {
+  const stockQty = new Map<string, number>();
+  for (const p of purchases.filter((x) => x.filialId === filialId))
+    for (const l of p.lines) stockQty.set(l.productId, (stockQty.get(l.productId) ?? 0) + l.qty);
+  for (const s of sales.filter((x) => x.filialId === filialId))
+    stockQty.set(s.productId, (stockQty.get(s.productId) ?? 0) - s.qty);
+  for (const t of transfers) {
+    if (t.fromFilialId === filialId)
+      for (const l of t.lines) stockQty.set(l.productId, (stockQty.get(l.productId) ?? 0) - l.qty);
+    if (t.toFilialId === filialId)
+      for (const l of t.lines) stockQty.set(l.productId, (stockQty.get(l.productId) ?? 0) + l.qty);
+  }
+  return stockQty;
+}
+
+export function getFilialStockQty(filialId: string | undefined, productId: string): number {
+  if (!filialId) {
+    return dbRead<Product[]>(KEYS.products, []).find((p) => p.id === productId)?.stock ?? 0;
+  }
+  const purchases = dbRead<Purchase[]>(KEYS.purchases, []);
+  const sales = dbRead<Sale[]>(KEYS.sales, []);
+  const transfers = dbRead<StockTransfer[]>(KEYS.transfers, []);
+  return computeFilialStockQty(filialId, purchases, sales, transfers).get(productId) ?? 0;
+}
+
+export type FilialStockMatrix = {
+  byFilial: Map<string, Map<string, number>>;
+  unlabeled: Map<string, number>;
+};
+
+/** Stock qty per product for every filial (+ unlabeled movements). */
+export function buildFilialStockMatrix(
+  filiais: Filial[],
+  purchases: Purchase[],
+  sales: Sale[],
+  transfers: StockTransfer[],
+): FilialStockMatrix {
+  const byFilial = new Map<string, Map<string, number>>();
+  for (const f of filiais) byFilial.set(f.id, computeFilialStockQty(f.id, purchases, sales, transfers));
+  const unlabeled = new Map<string, number>();
+  for (const p of purchases.filter((x) => !x.filialId))
+    for (const l of p.lines) unlabeled.set(l.productId, (unlabeled.get(l.productId) ?? 0) + l.qty);
+  for (const s of sales.filter((x) => !x.filialId))
+    unlabeled.set(s.productId, (unlabeled.get(s.productId) ?? 0) - s.qty);
+  return { byFilial, unlabeled };
+}
+
+export function productFilialQty(matrix: FilialStockMatrix, filialId: string, productId: string): number {
+  return matrix.byFilial.get(filialId)?.get(productId) ?? 0;
+}
+
+export function productTotalFilialQty(matrix: FilialStockMatrix, filiais: Filial[], productId: string): number {
+  let n = matrix.unlabeled.get(productId) ?? 0;
+  for (const f of filiais) n += productFilialQty(matrix, f.id, productId);
+  return n;
+}
 
 const EMPTY_COMPANY: Company = { name: "" };
 
@@ -53,6 +126,7 @@ export function useAccounts(filialFilter: string = "all") {
   const [products, setProducts] = useState<Product[]>(() => dbRead<Product[]>(KEYS.products, []));
   const [purchases, setPurchases] = useState<Purchase[]>(() => dbRead<Purchase[]>(KEYS.purchases, []));
   const [sales, setSales] = useState<Sale[]>(() => dbRead<Sale[]>(KEYS.sales, []));
+  const [transfers, setTransfers] = useState<StockTransfer[]>(() => dbRead<StockTransfer[]>(KEYS.transfers, []));
 
   useEffect(() => {
     const sync = () => {
@@ -65,6 +139,7 @@ export function useAccounts(filialFilter: string = "all") {
       setProducts(dbRead<Product[]>(KEYS.products, []));
       setPurchases(dbRead<Purchase[]>(KEYS.purchases, []));
       setSales(dbRead<Sale[]>(KEYS.sales, []));
+      setTransfers(dbRead<StockTransfer[]>(KEYS.transfers, []));
     };
     window.addEventListener("erp:change", sync);
     window.addEventListener("storage", sync);
@@ -114,10 +189,23 @@ export function useAccounts(filialFilter: string = "all") {
   });
   const totalOwed = supplierStats.reduce((a, s) => a + s.owed, 0);
 
-  // ---- stock per filial (derived from labeled purchases/sales) ----
+  // ---- stock per filial (purchases + transfers in − sales − transfers out) ----
   const stockQty = new Map<string, number>();
   for (const p of fPurchases) for (const l of p.lines) stockQty.set(l.productId, (stockQty.get(l.productId) ?? 0) + l.qty);
   for (const s of fSales) stockQty.set(s.productId, (stockQty.get(s.productId) ?? 0) - s.qty);
+  const fTransfers = transfers.filter((t) => {
+    if (filialFilter === "all") return true;
+    if (filialFilter === "none") return false;
+    return t.fromFilialId === filialFilter || t.toFilialId === filialFilter;
+  });
+  for (const t of fTransfers) {
+    for (const l of t.lines) {
+      if (filialFilter === "all" || t.fromFilialId === filialFilter)
+        stockQty.set(l.productId, (stockQty.get(l.productId) ?? 0) - l.qty);
+      if (filialFilter === "all" || t.toFilialId === filialFilter)
+        stockQty.set(l.productId, (stockQty.get(l.productId) ?? 0) + l.qty);
+    }
+  }
   const stockStats = products
     .map((pr) => {
       const qty = stockQty.get(pr.id) ?? 0;
@@ -127,6 +215,7 @@ export function useAccounts(filialFilter: string = "all") {
     .sort((a, b) => b.value - a.value);
   const stockUnits = stockStats.reduce((a, x) => a + x.qty, 0);
   const stockValue = stockStats.reduce((a, x) => a + x.value, 0);
+  const filialStockMatrix = buildFilialStockMatrix(filiais, purchases, sales, transfers);
 
   // ---- how many old records are not yet assigned to a filial ----
   const unlabeledPurchases = purchases.filter((p) => !p.filialId).length;
@@ -156,9 +245,12 @@ export function useAccounts(filialFilter: string = "all") {
     allFreight,
     freightTotal,
     products,
+    purchases,
+    sales,
     stockStats,
     stockUnits,
     stockValue,
+    filialStockMatrix,
     unlabeledPurchases,
     unlabeledSales,
     fSales,
@@ -166,6 +258,7 @@ export function useAccounts(filialFilter: string = "all") {
     fCash,
     fPayments,
     fFreight,
+    transfers,
 
     // ---- company / filial actions ----
     saveCompany: (patch: Partial<Company>) => {
@@ -285,6 +378,46 @@ export function useAccounts(filialFilter: string = "all") {
     removeFreight: (id: string) => {
       dbWrite(KEYS.freight, dbRead<FreightEntry[]>(KEYS.freight, []).filter((f) => f.id !== id));
     },
+
+    addTransfer: (
+      fromFilialId: string,
+      toFilialId: string,
+      lines: StockTransferLine[],
+      date: string,
+      note?: string,
+    ): { ok: boolean; error?: string } => {
+      if (!fromFilialId || !toFilialId) return { ok: false, error: "Seleccione origem e destino." };
+      if (fromFilialId === toFilialId) return { ok: false, error: "Origem e destino têm de ser filiais diferentes." };
+      const validLines = lines.filter((l) => l.productId && l.qty > 0);
+      if (validLines.length === 0) return { ok: false, error: "Adicione pelo menos um produto com quantidade." };
+      const list = dbRead<StockTransfer[]>(KEYS.transfers, []);
+      const allPurchases = dbRead<Purchase[]>(KEYS.purchases, []);
+      const allSales = dbRead<Sale[]>(KEYS.sales, []);
+      const stock = computeFilialStockQty(fromFilialId, allPurchases, allSales, list);
+      const allProducts = dbRead<Product[]>(KEYS.products, []);
+      for (const l of validLines) {
+        const avail = stock.get(l.productId) ?? 0;
+        if (l.qty > avail) {
+          const pr = allProducts.find((p) => p.id === l.productId);
+          const label = pr?.sku?.trim() || pr?.name || "produto";
+          return { ok: false, error: `Stock insuficiente em ${filialName(filiais, fromFilialId)} para «${label}»: tem ${avail}, pediu ${l.qty}.` };
+        }
+      }
+      const entry: StockTransfer = {
+        id: crypto.randomUUID(),
+        date,
+        fromFilialId,
+        toFilialId,
+        lines: validLines,
+        note: note?.trim() || undefined,
+      };
+      dbWrite(KEYS.transfers, [entry, ...list]);
+      return { ok: true };
+    },
+    removeTransfer: (id: string) => {
+      dbWrite(KEYS.transfers, dbRead<StockTransfer[]>(KEYS.transfers, []).filter((t) => t.id !== id));
+    },
+
     updateFilial: (id: string, patch: { name?: string; location?: string }): { ok: boolean; error?: string } => {
       const list = dbRead<Filial[]>(KEYS.filiais, []);
       if (patch.name !== undefined) {

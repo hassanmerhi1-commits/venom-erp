@@ -1,8 +1,8 @@
-version: 1.2.6
+version: 1.2.7
 files:
-  - url: VENOM-ERP-Setup-1.2.6.exe
-    sha512: f83KdVihAgTpCWzGj7z5iJ/58IdZMzk/ZItNhg651tBHKplQVXH2BIEtNYttFvNMHC9xvetXGAHprSmpkKImsA==
-    size: 84203140
-path: VENOM-ERP-Setup-1.2.6.exe
-sha512: f83KdVihAgTpCWzGj7z5iJ/58IdZMzk/ZItNhg651tBHKplQVXH2BIEtNYttFvNMHC9xvetXGAHprSmpkKImsA==
-releaseDate: '2026-06-16T14:33:34.047Z'
+  - url: VENOM-ERP-Setup-1.2.7.exe
+    sha512: XGYqzFeXPZfjmibmWxhW2yhjqhh5O0Qxj+JlbPZbJxN16Vf2yFVKZ8krOKPhKnlNKFTn0DeXCgJvhugsEce6Fg==
+    size: 84259665
+path: VENOM-ERP-Setup-1.2.7.exe
+sha512: XGYqzFeXPZfjmibmWxhW2yhjqhh5O0Qxj+JlbPZbJxN16Vf2yFVKZ8krOKPhKnlNKFTn0DeXCgJvhugsEce6Fg==
+releaseDate: '2026-06-17T11:30:58.373Z'
