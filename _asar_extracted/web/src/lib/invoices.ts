@@ -2,8 +2,8 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import type { Product, Sale, Purchase } from "./erp-store";
 import { fmt, productPickLabel } from "./erp-store";
-import { getCompany, filialName, type Filial } from "./accounts-store";
-import { dbRead } from "./db";
+import { getCompany, filialName } from "./accounts-store";
+import { readFiliais, saleInvoiceNumber } from "./filial-accounts";
 
 const BRAND: [number, number, number] = [56, 163, 216];
 const GOLD: [number, number, number] = [212, 175, 55];
@@ -20,8 +20,9 @@ type InvoiceIssuer = {
 
 function readIssuer(filialId?: string): InvoiceIssuer {
   const company = getCompany();
-  const filiais = dbRead<Filial[]>("erp.filiais.v1", []);
-  const filial = filialId ? filialName(filiais, filialId) : undefined;
+  const filiais = readFiliais();
+  const f = filialId ? filiais.find((x) => x.id === filialId) : undefined;
+  const filial = f ? (f.accountCode ? `${f.name} (Conta ${f.accountCode})` : f.name) : filialId ? filialName(filiais, filialId) : undefined;
   const name = company.name?.trim() || filial || "VENOM ERP";
   return {
     name,
@@ -400,7 +401,7 @@ export function printSaleInvoice(group: Sale[], products: Product[]): PdfResult 
   const issuer = readIssuer(first.filialId);
   const customer = first.customerName?.trim();
   const doc = new jsPDF();
-  const number = invoiceNumber("FV", first.date, first.id);
+  const number = saleInvoiceNumber(group) ?? invoiceNumber("FV", first.date, first.id);
   let startY = header(doc, "VENDA", number, first.date, issuer);
   if (customer) {
     doc.setFont("helvetica", "bold");

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { dbRead, dbWrite, dbExportAll, dbImportAll, dbClearKeys } from "./db";
 import { mergeFromMain, mergeFromFilial, parseSyncPayload } from "./db-sync";
+import { allocateInvoiceNumber, readFiliais, normAccountCode } from "./filial-accounts";
 export { dbInfo, dbChangePath, dbReveal } from "./db";
 
 export type Product = {
@@ -42,6 +43,9 @@ export type Sale = {
   revenue: number;
   profit: number;
   filialId?: string; // branch this sale belongs to
+  filialAccountCode?: string; // stable account code (survives sync)
+  invoiceNumber?: string; // shared by all lines in one sale
+  invoiceSeq?: number;
   customerName?: string; // buyer name on invoice
 };
 
@@ -171,11 +175,25 @@ export function useErp() {
       items: Array<{ productId: string; qty: number; unitPrice: number }>,
       filialId?: string,
       customerName?: string,
-    ) => {
+    ): { ok: true; invoiceNumber?: string } | { ok: false; error: string } => {
+      const filiais = readFiliais();
       const products = read<Product[]>(KEYS.products, []);
       const sales = read<Sale[]>(KEYS.sales, []);
       const saleFilial = filialId ?? currentFilialId();
+      if (filiais.length > 0 && !saleFilial) {
+        return { ok: false, error: "Seleccione a filial activa no cabeçalho antes de vender." };
+      }
       const buyer = customerName?.trim() || undefined;
+      let invoiceNumber: string | undefined;
+      let invoiceSeq: number | undefined;
+      let filialAccountCode: string | undefined;
+      if (saleFilial) {
+        const alloc = allocateInvoiceNumber(saleFilial, date);
+        if (!alloc) return { ok: false, error: "Filial inválida ou sem código de conta." };
+        invoiceNumber = alloc.number;
+        invoiceSeq = alloc.seq;
+        filialAccountCode = alloc.accountCode;
+      }
       const productsCopy = [...products];
       const newSales: Sale[] = [];
       for (const it of items) {
@@ -193,13 +211,18 @@ export function useErp() {
           revenue: it.qty * it.unitPrice,
           profit: (it.unitPrice - unitCost) * it.qty,
           filialId: saleFilial,
+          filialAccountCode,
+          invoiceNumber,
+          invoiceSeq,
           customerName: buyer,
         };
         newSales.push(sale);
         productsCopy[idx] = { ...p, stock: Math.max(0, p.stock - it.qty) };
       }
+      if (newSales.length === 0) return { ok: false, error: "Nenhum produto válido na venda." };
       write(KEYS.products, productsCopy);
       write(KEYS.sales, [...newSales, ...sales]);
+      return { ok: true, invoiceNumber };
     },
     // ---- editing ----
     updatePurchase: (
@@ -239,11 +262,17 @@ export function useErp() {
       customerName?: string,
     ) => {
       const salesList = read<Sale[]>(KEYS.sales, []);
+      const oldGroup = salesList.filter((s) => s.date === groupDate);
       const remaining = salesList.filter((s) => s.date !== groupDate);
       const base = read<Product[]>(KEYS.products, []);
       const purchasesList = read<Purchase[]>(KEYS.purchases, []);
       const costs = avgCostMap(purchasesList, base);
       const buyer = customerName?.trim() || undefined;
+      const keepInvoice = oldGroup[0]?.invoiceNumber;
+      const keepSeq = oldGroup[0]?.invoiceSeq;
+      const filiaisList = readFiliais();
+      const accFromFilial = filialId ? filiaisList.find((f) => f.id === filialId)?.accountCode : undefined;
+      const keepAccount = accFromFilial ? normAccountCode(accFromFilial) : oldGroup[0]?.filialAccountCode;
       const newSales: Sale[] = items.map((it) => {
         const unitCost = costs.get(it.productId) ?? 0;
         return {
@@ -256,6 +285,9 @@ export function useErp() {
           revenue: it.qty * it.unitPrice,
           profit: (it.unitPrice - unitCost) * it.qty,
           filialId,
+          filialAccountCode: keepAccount,
+          invoiceNumber: keepInvoice,
+          invoiceSeq: keepSeq,
           customerName: buyer,
         };
       });

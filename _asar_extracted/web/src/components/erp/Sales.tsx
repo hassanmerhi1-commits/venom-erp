@@ -122,6 +122,10 @@ export function Sales() {
       return;
     }
     if (anyOver && !confirm("Algumas linhas excedem o stock. Continuar mesmo assim?")) return;
+    if (filiais.length > 0 && !(isCaixa ? activeFilial : filialId)) {
+      alert("Seleccione a filial activa no cabeçalho (ou no formulário) antes de vender.");
+      return;
+    }
     setSaving(true);
     try {
       const saleDate = isCaixa ? todayISO() : date;
@@ -131,7 +135,11 @@ export function Sales() {
       if (editingDate) {
         updateSaleGroup(editingDate, stamp, valid, saleFilial, buyer);
       } else {
-        recordSale(stamp, valid, saleFilial, buyer);
+        const r = recordSale(stamp, valid, saleFilial, buyer);
+        if (!r.ok) {
+          alert(r.error);
+          return;
+        }
         const companyInfo = getCompany();
         await printThermalSaleCopies({
           companyName: companyInfo.name?.trim() || (filiais.length ? filialName(filiais, saleFilial) : ""),
@@ -139,7 +147,7 @@ export function Sales() {
           filialName: filiais.length ? filialName(filiais, saleFilial) : undefined,
           customerName: buyer,
           dateISO: stamp,
-          receiptNo: thermalReceiptNumber(stamp),
+          receiptNo: r.invoiceNumber ?? thermalReceiptNumber(stamp),
           items: valid.map((it) => ({
             product: products.find((p) => p.id === it.productId),
             qty: it.qty,
@@ -260,10 +268,9 @@ export function Sales() {
             {filiais.length > 0 && (
               <div>
                 <label className="label">Filial</label>
-                <select className="input" value={filialId} onChange={(e) => setFilialId(e.target.value)}>
-                  <option value="">— sem filial —</option>
+                <select className="input" value={filialId} onChange={(e) => setFilialId(e.target.value)} required>
                   {filiais.map((f) => (
-                    <option key={f.id} value={f.id}>{f.name}</option>
+                    <option key={f.id} value={f.id}>{f.name} · Conta {f.accountCode}</option>
                   ))}
                 </select>
               </div>
@@ -369,14 +376,16 @@ export function Sales() {
                     <div className="flex items-center justify-between gap-3">
                       <div className="text-sm">
                         <div className="flex flex-wrap items-center gap-2 font-medium">
-                          Fatura · {new Date(first.date).toLocaleString("pt-AO")}
+                          {first.invoiceNumber ?? `Fatura · ${new Date(first.date).toLocaleString("pt-AO")}`}
                           {filiais.length > 0 && (
-                            <span className="pill" style={{ background: "color-mix(in oklab, var(--primary) 16%, transparent)", color: "var(--primary)" }}>🏪 {filialName(filiais, first.filialId)}</span>
+                            <span className="pill" style={{ background: "color-mix(in oklab, var(--primary) 16%, transparent)", color: "var(--primary)" }}>
+                              🏪 {first.filialAccountCode ? `Conta ${first.filialAccountCode}` : filialName(filiais, first.filialId)}
+                            </span>
                           )}
                         </div>
                         <div className="text-xs text-muted-foreground">
                           {first.customerName ? <>Cliente: {first.customerName} · </> : null}
-                          {group.length} produto(s) · {units} unidade(s)
+                          {new Date(first.date).toLocaleString("pt-AO")} · {group.length} produto(s) · {units} unidade(s)
                         </div>
                       </div>
                       <div className="flex items-center gap-2">

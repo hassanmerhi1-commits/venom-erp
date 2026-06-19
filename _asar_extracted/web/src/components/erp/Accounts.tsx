@@ -906,28 +906,49 @@ function Empresa({ acc }: { acc: Acc }) {
 
   const [fName, setFName] = useState("");
   const [fLoc, setFLoc] = useState("");
+  const [fCode, setFCode] = useState("");
   const [fMsg, setFMsg] = useState<string | null>(null);
 
   const [editFil, setEditFil] = useState<string | null>(null);
   const [efName, setEfName] = useState("");
   const [efLoc, setEfLoc] = useState("");
+  const [efCode, setEfCode] = useState("");
+  const [efSeries, setEfSeries] = useState("");
+  const [efNext, setEfNext] = useState("1");
   const [efMsg, setEfMsg] = useState<string | null>(null);
-  const startEditFilial = (f: { id: string; name: string; location?: string }) => {
-    setEditFil(f.id); setEfName(f.name); setEfLoc(f.location ?? ""); setEfMsg(null);
+  const startEditFilial = (f: { id: string; name: string; location?: string; accountCode: string; invoiceSeries?: string; nextInvoiceNumber?: number }) => {
+    setEditFil(f.id);
+    setEfName(f.name);
+    setEfLoc(f.location ?? "");
+    setEfCode(f.accountCode);
+    setEfSeries(f.invoiceSeries ?? `FV/${f.accountCode}`);
+    setEfNext(String(f.nextInvoiceNumber ?? 1));
+    setEfMsg(null);
   };
   const saveEditFilial = (id: string) => {
-    const r = acc.updateFilial(id, { name: efName, location: efLoc });
+    const r = acc.updateFilial(id, {
+      name: efName,
+      location: efLoc,
+      accountCode: efCode,
+      invoiceSeries: efSeries,
+      nextInvoiceNumber: parseInt(efNext, 10) || 1,
+    });
     if (r.ok) { setEditFil(null); setEfMsg(null); }
     else setEfMsg(r.error ?? "Erro");
   };
 
   const [assignTo, setAssignTo] = useState("");
   const unlabeled = acc.unlabeledPurchases + acc.unlabeledSales;
+  const orphan = (acc.orphanPurchases ?? 0) + (acc.orphanSales ?? 0);
+  const needsLink = unlabeled + orphan;
   const runAssign = () => {
     if (!assignTo) return;
-    const fname = acc.filiais.find((f) => f.id === assignTo)?.name ?? "";
-    if (!confirm(`Atribuir ${acc.unlabeledPurchases} compra(s) e ${acc.unlabeledSales} venda(s) sem filial a "${fname}"?`)) return;
-    acc.assignUnlabeledToFilial(assignTo);
+    const f = acc.filiais.find((x) => x.id === assignTo);
+    const fname = f?.name ?? "";
+    const label = f?.accountCode ? `${fname} (Conta ${f.accountCode})` : fname;
+    if (!confirm(`Ligar compras/vendas sem filial ou com filial inválida a "${label}"?\n\nIsto actualiza o histórico antigo com a conta correcta.`)) return;
+    const n = acc.assignUnlabeledToFilial(assignTo);
+    alert(n > 0 ? `${n} registo(s) actualizado(s) para Conta ${f?.accountCode ?? ""}.` : "Nada a actualizar.");
     setAssignTo("");
   };
 
@@ -938,8 +959,8 @@ function Empresa({ acc }: { acc: Acc }) {
   };
 
   const addFilial = () => {
-    const r = acc.addFilial(fName, fLoc);
-    if (r.ok) { setFName(""); setFLoc(""); setFMsg(null); }
+    const r = acc.addFilial(fName, fLoc, fCode || undefined);
+    if (r.ok) { setFName(""); setFLoc(""); setFCode(""); setFMsg(null); }
     else setFMsg(r.error ?? "Erro");
   };
 
@@ -992,9 +1013,13 @@ function Empresa({ acc }: { acc: Acc }) {
 
       <div className="card h-fit">
         <h3 className="mb-4 text-base font-semibold">Filiais ({acc.filiais.length})</h3>
-        <div className="grid gap-2 sm:grid-cols-[1.5fr_1.5fr_auto]">
+        <p className="mb-3 text-xs text-muted-foreground">
+          Cada filial tem um <b>código de conta</b> fixo (ex: 001) — use o mesmo código na matriz e na loja para a sincronização reconhecer as vendas.
+        </p>
+        <div className="grid gap-2 sm:grid-cols-[1fr_1fr_0.7fr_auto]">
           <input className="input" placeholder="Nome da filial" value={fName} onChange={(e) => setFName(e.target.value)} />
           <input className="input" placeholder="Localização (opcional)" value={fLoc} onChange={(e) => setFLoc(e.target.value)} />
+          <input className="input font-mono" placeholder="Conta (auto)" value={fCode} onChange={(e) => setFCode(e.target.value)} title="Código de conta — deixe vazio para gerar automaticamente" />
           <button className="btn-primary" onClick={addFilial} disabled={!fName.trim()}>+ Filial</button>
         </div>
         {fMsg && <div className="mt-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">{fMsg}</div>}
@@ -1005,10 +1030,15 @@ function Empresa({ acc }: { acc: Acc }) {
             <li key={f.id} className="py-2">
               {editFil === f.id ? (
                 <div>
-                  <div className="grid gap-2 sm:grid-cols-[1.5fr_1.5fr_auto_auto]">
-                    <input className="input" placeholder="Nome da filial" value={efName} onChange={(e) => setEfName(e.target.value)} autoFocus />
+                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                    <input className="input" placeholder="Nome" value={efName} onChange={(e) => setEfName(e.target.value)} autoFocus />
                     <input className="input" placeholder="Localização" value={efLoc} onChange={(e) => setEfLoc(e.target.value)} />
-                    <button className="btn-primary text-xs" onClick={() => saveEditFilial(f.id)} disabled={!efName.trim()}>Guardar</button>
+                    <input className="input font-mono" placeholder="Conta" value={efCode} onChange={(e) => setEfCode(e.target.value)} />
+                    <input className="input font-mono" placeholder="Série faturas" value={efSeries} onChange={(e) => setEfSeries(e.target.value)} />
+                    <input type="number" min={1} className="input" placeholder="Próximo nº" value={efNext} onChange={(e) => setEfNext(e.target.value)} />
+                  </div>
+                  <div className="mt-2 flex gap-2">
+                    <button className="btn-primary text-xs" onClick={() => saveEditFilial(f.id)} disabled={!efName.trim() || !efCode.trim()}>Guardar</button>
                     <button className="btn-secondary text-xs" onClick={() => setEditFil(null)}>Cancelar</button>
                   </div>
                   {efMsg && <div className="mt-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">{efMsg}</div>}
@@ -1018,9 +1048,13 @@ function Empresa({ acc }: { acc: Acc }) {
                   <div>
                     <div className="font-medium">
                       {f.name}
+                      <span className="ml-2 pill font-mono" style={{ background: "var(--muted)", color: "var(--foreground)" }}>Conta {f.accountCode}</span>
                       {acc.company.currentFilialId === f.id && <span className="ml-2 pill" style={{ background: "color-mix(in oklab, var(--primary) 18%, transparent)", color: "var(--primary)" }}>atual</span>}
                     </div>
-                    {f.location && <div className="text-xs text-muted-foreground">{f.location}</div>}
+                    <div className="text-xs text-muted-foreground">
+                      {f.location && <span>{f.location} · </span>}
+                      Série {f.invoiceSeries ?? `FV/${f.accountCode}`} · próximo nº {f.nextInvoiceNumber ?? 1}
+                    </div>
                   </div>
                   <div className="flex items-center gap-2">
                     {acc.company.currentFilialId !== f.id && (
@@ -1040,17 +1074,19 @@ function Empresa({ acc }: { acc: Acc }) {
         <div className="card h-fit lg:col-span-2">
           <h3 className="mb-1 text-base font-semibold">Ligar dados antigos a uma filial</h3>
           <p className="mb-3 text-xs text-muted-foreground">
-            Compras e vendas registadas antes de criar filiais ficam <b>sem filial</b>. Atribua-as a uma filial para aparecerem nas contas, stock e relatórios dessa filial.
+            Vendas/compras <b>sem filial</b> ou com filial inválida (ex.: importadas de outro PC) podem ser ligadas à conta correcta.
+            Ao abrir a app, registos órfãos são auto-ligados à <b>filial activa</b> no cabeçalho (se só houver uma filial, usa essa).
           </p>
-          {unlabeled === 0 ? (
+          {needsLink === 0 ? (
             <p className="rounded-md border border-[var(--border)] bg-[var(--muted)]/40 px-3 py-2 text-sm text-muted-foreground">
-              ✓ Tudo ligado — não há compras nem vendas sem filial.
+              ✓ Tudo ligado — não há compras nem vendas sem filial ou inválidas.
             </p>
           ) : (
             <div className="flex flex-wrap items-end gap-3">
               <div className="text-sm">
                 <span className="pill" style={{ background: "color-mix(in oklab, var(--destructive) 16%, transparent)", color: "var(--destructive)" }}>
-                  {acc.unlabeledPurchases} compra(s) · {acc.unlabeledSales} venda(s) sem filial
+                  {acc.unlabeledPurchases} compra(s) sem filial · {acc.unlabeledSales} venda(s) sem filial
+                  {(orphan > 0) && ` · ${orphan} com filial inválida`}
                 </span>
               </div>
               <div>
@@ -1058,7 +1094,7 @@ function Empresa({ acc }: { acc: Acc }) {
                 <select className="input min-w-[180px]" value={assignTo} onChange={(e) => setAssignTo(e.target.value)}>
                   <option value="">— escolher filial —</option>
                   {acc.filiais.map((f) => (
-                    <option key={f.id} value={f.id}>{f.name}</option>
+                    <option key={f.id} value={f.id}>{f.name} · Conta {f.accountCode}</option>
                   ))}
                 </select>
               </div>

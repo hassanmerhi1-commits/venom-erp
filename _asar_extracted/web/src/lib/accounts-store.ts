@@ -1,8 +1,18 @@
 import { useEffect, useState } from "react";
 import { dbRead, dbWrite } from "./db";
 import type { Purchase, Sale, Product } from "./erp-store";
+import {
+  normAccountCode,
+  defaultInvoiceSeries,
+  suggestNextAccountCode,
+  readFiliais,
+  assignAllOrphanToFilial,
+  countOrphanFilialRecords,
+  filialAccountLabel,
+  type Filial,
+} from "./filial-accounts";
 
-export type Filial = { id: string; name: string; location?: string; createdAt: string };
+export type { Filial } from "./filial-accounts";
 export type Supplier = { id: string; name: string; phone?: string; note?: string; createdAt: string };
 export type CashEntry = { id: string; date: string; type: "in" | "out"; amount: number; note: string; filialId?: string };
 export type SupplierPayment = { id: string; supplierId: string; date: string; amount: number; note?: string; filialId?: string };
@@ -107,7 +117,9 @@ export function getCurrentFilialId(): string | undefined {
 
 export function filialName(filiais: Filial[], id?: string): string {
   if (!id) return "Geral";
-  return filiais.find((f) => f.id === id)?.name ?? "Geral";
+  const f = filiais.find((x) => x.id === id);
+  if (!f) return "Geral";
+  return f.accountCode ? filialAccountLabel(f) : f.name;
 }
 
 function matchFilial(filialId: string | undefined, filter: string): boolean {
@@ -118,7 +130,7 @@ function matchFilial(filialId: string | undefined, filter: string): boolean {
 
 export function useAccounts(filialFilter: string = "all") {
   const [company, setCompany] = useState<Company>(() => getCompany());
-  const [filiais, setFiliais] = useState<Filial[]>(() => dbRead<Filial[]>(KEYS.filiais, []));
+  const [filiais, setFiliais] = useState<Filial[]>(() => readFiliais());
   const [suppliers, setSuppliers] = useState<Supplier[]>(() => dbRead<Supplier[]>(KEYS.suppliers, []));
   const [cash, setCash] = useState<CashEntry[]>(() => dbRead<CashEntry[]>(KEYS.cash, []));
   const [payments, setPayments] = useState<SupplierPayment[]>(() => dbRead<SupplierPayment[]>(KEYS.payments, []));
@@ -131,7 +143,7 @@ export function useAccounts(filialFilter: string = "all") {
   useEffect(() => {
     const sync = () => {
       setCompany(getCompany());
-      setFiliais(dbRead<Filial[]>(KEYS.filiais, []));
+      setFiliais(readFiliais());
       setSuppliers(dbRead<Supplier[]>(KEYS.suppliers, []));
       setCash(dbRead<CashEntry[]>(KEYS.cash, []));
       setPayments(dbRead<SupplierPayment[]>(KEYS.payments, []));
@@ -220,6 +232,7 @@ export function useAccounts(filialFilter: string = "all") {
   // ---- how many old records are not yet assigned to a filial ----
   const unlabeledPurchases = purchases.filter((p) => !p.filialId).length;
   const unlabeledSales = sales.filter((s) => !s.filialId).length;
+  const orphanStats = countOrphanFilialRecords(filiais);
 
   // ---- freight (purchase transport + standalone entries) ----
   const purchaseFreight = fPurchases
@@ -253,6 +266,8 @@ export function useAccounts(filialFilter: string = "all") {
     filialStockMatrix,
     unlabeledPurchases,
     unlabeledSales,
+    orphanPurchases: orphanStats.purchases,
+    orphanSales: orphanStats.sales,
     fSales,
     fPurchases,
     fCash,
@@ -267,15 +282,24 @@ export function useAccounts(filialFilter: string = "all") {
     setCurrentFilial: (id: string | undefined) => {
       dbWrite(KEYS.company, { ...getCompany(), currentFilialId: id });
     },
-    addFilial: (name: string, location?: string): { ok: boolean; error?: string } => {
+    addFilial: (name: string, location?: string, accountCode?: string): { ok: boolean; error?: string } => {
       const n = name.trim();
       if (!n) return { ok: false, error: "Indique o nome da filial." };
-      const list = dbRead<Filial[]>(KEYS.filiais, []);
+      const list = readFiliais();
       if (list.some((f) => f.name.toLowerCase() === n.toLowerCase())) return { ok: false, error: "Filial já existe." };
-      const next: Filial = { id: crypto.randomUUID(), name: n, location: location?.trim() || undefined, createdAt: new Date().toISOString() };
+      const code = accountCode?.trim() ? normAccountCode(accountCode) : suggestNextAccountCode(list);
+      if (list.some((f) => normAccountCode(f.accountCode) === code)) return { ok: false, error: `Conta ${code} já existe.` };
+      const next: Filial = {
+        id: crypto.randomUUID(),
+        name: n,
+        location: location?.trim() || undefined,
+        accountCode: code,
+        invoiceSeries: defaultInvoiceSeries(code),
+        nextInvoiceNumber: 1,
+        createdAt: new Date().toISOString(),
+      };
       const updated = [...list, next];
       dbWrite(KEYS.filiais, updated);
-      // first filial becomes current automatically
       if (!getCurrentFilialId()) dbWrite(KEYS.company, { ...getCompany(), currentFilialId: next.id });
       return { ok: true };
     },
@@ -285,13 +309,8 @@ export function useAccounts(filialFilter: string = "all") {
     },
     // assign every purchase/sale/cash/payment/freight that has no filial yet to the chosen branch
     assignUnlabeledToFilial: (filialId: string) => {
-      if (!filialId) return;
-      const stamp = <T extends { filialId?: string }>(list: T[]) => list.map((x) => (x.filialId ? x : { ...x, filialId }));
-      dbWrite(KEYS.purchases, stamp(dbRead<Purchase[]>(KEYS.purchases, [])));
-      dbWrite(KEYS.sales, stamp(dbRead<Sale[]>(KEYS.sales, [])));
-      dbWrite(KEYS.cash, stamp(dbRead<CashEntry[]>(KEYS.cash, [])));
-      dbWrite(KEYS.payments, stamp(dbRead<SupplierPayment[]>(KEYS.payments, [])));
-      dbWrite(KEYS.freight, stamp(dbRead<FreightEntry[]>(KEYS.freight, [])));
+      if (!filialId) return 0;
+      return assignAllOrphanToFilial(filialId);
     },
 
     // ---- supplier actions ----
@@ -418,16 +437,41 @@ export function useAccounts(filialFilter: string = "all") {
       dbWrite(KEYS.transfers, dbRead<StockTransfer[]>(KEYS.transfers, []).filter((t) => t.id !== id));
     },
 
-    updateFilial: (id: string, patch: { name?: string; location?: string }): { ok: boolean; error?: string } => {
-      const list = dbRead<Filial[]>(KEYS.filiais, []);
+    updateFilial: (
+      id: string,
+      patch: { name?: string; location?: string; accountCode?: string; invoiceSeries?: string; nextInvoiceNumber?: number },
+    ): { ok: boolean; error?: string } => {
+      const list = readFiliais();
       if (patch.name !== undefined) {
         const n = patch.name.trim();
         if (!n) return { ok: false, error: "Indique o nome da filial." };
         if (list.some((f) => f.id !== id && f.name.toLowerCase() === n.toLowerCase())) return { ok: false, error: "Filial já existe." };
       }
+      if (patch.accountCode !== undefined) {
+        const code = normAccountCode(patch.accountCode);
+        if (!code) return { ok: false, error: "Indique o código de conta." };
+        if (list.some((f) => f.id !== id && normAccountCode(f.accountCode) === code)) return { ok: false, error: `Conta ${code} já existe.` };
+      }
+      if (patch.nextInvoiceNumber !== undefined && patch.nextInvoiceNumber < 1) {
+        return { ok: false, error: "Próximo nº de fatura deve ser ≥ 1." };
+      }
       dbWrite(
         KEYS.filiais,
-        list.map((f) => (f.id === id ? { ...f, name: patch.name !== undefined ? patch.name.trim() : f.name, location: patch.location !== undefined ? patch.location.trim() || undefined : f.location } : f)),
+        list.map((f) => {
+          if (f.id !== id) return f;
+          const accountCode = patch.accountCode !== undefined ? normAccountCode(patch.accountCode) : f.accountCode;
+          return {
+            ...f,
+            name: patch.name !== undefined ? patch.name.trim() : f.name,
+            location: patch.location !== undefined ? patch.location.trim() || undefined : f.location,
+            accountCode,
+            invoiceSeries:
+              patch.invoiceSeries !== undefined
+                ? patch.invoiceSeries.trim() || defaultInvoiceSeries(accountCode)
+                : f.invoiceSeries || defaultInvoiceSeries(accountCode),
+            nextInvoiceNumber: patch.nextInvoiceNumber !== undefined ? patch.nextInvoiceNumber : f.nextInvoiceNumber ?? 1,
+          };
+        }),
       );
       return { ok: true };
     },

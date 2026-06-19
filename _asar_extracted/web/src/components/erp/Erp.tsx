@@ -145,7 +145,7 @@ export function Erp() {
               >
                 <option value="">— sem filial —</option>
                 {filiais.map((f) => (
-                  <option key={f.id} value={f.id}>🏪 {f.name}</option>
+                  <option key={f.id} value={f.id}>🏪 {f.name} · Conta {f.accountCode}</option>
                 ))}
               </select>
             )}

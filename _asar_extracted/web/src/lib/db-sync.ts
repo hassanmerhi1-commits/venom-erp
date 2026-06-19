@@ -1,6 +1,14 @@
 import { dbRead, dbSaveBatch } from "./db";
 import { computeProducts, type Product, type Purchase, type Sale } from "./erp-store";
 import type { CashEntry, Company, Filial, FreightEntry, Supplier, SupplierPayment } from "./accounts-store";
+import {
+  normAccountCode,
+  ensureFilialAccounts,
+  buildFilialIdMap,
+  remapSaleFilial,
+  bumpInvoiceCounterIfNeeded,
+  findFilialByAccountCode,
+} from "./filial-accounts";
 
 export type SyncPayload = Record<string, unknown>;
 
@@ -33,12 +41,35 @@ function asArray<T>(v: unknown): T[] {
 }
 
 function mergeFiliais(local: Filial[], incoming: Filial[]): Filial[] {
-  const map = new Map(local.map((f) => [f.id, f]));
-  for (const f of incoming) {
-    const existing = map.get(f.id);
-    map.set(f.id, existing ? { ...existing, name: f.name, location: f.location ?? existing.location } : f);
+  const localNorm = ensureFilialAccounts(local);
+  const incomingNorm = ensureFilialAccounts(incoming);
+  const byCode = new Map(localNorm.map((f) => [normAccountCode(f.accountCode), { ...f }]));
+  const byId = new Map(localNorm.map((f) => [f.id, { ...f }]));
+
+  for (const inf of incomingNorm) {
+    const code = normAccountCode(inf.accountCode);
+    const existing = byCode.get(code) ?? byId.get(inf.id);
+    if (existing) {
+      const merged: Filial = {
+        ...existing,
+        name: inf.name || existing.name,
+        location: inf.location ?? existing.location,
+        accountCode: existing.accountCode || code,
+        invoiceSeries: existing.invoiceSeries || inf.invoiceSeries,
+        nextInvoiceNumber: Math.max(existing.nextInvoiceNumber ?? 1, inf.nextInvoiceNumber ?? 1),
+      };
+      byCode.set(normAccountCode(merged.accountCode), merged);
+      byId.set(merged.id, merged);
+    } else {
+      const added = { ...inf, accountCode: code, nextInvoiceNumber: inf.nextInvoiceNumber ?? 1 };
+      byCode.set(code, added);
+      byId.set(added.id, added);
+    }
   }
-  return [...map.values()];
+
+  const out = new Map<string, Filial>();
+  for (const f of byId.values()) out.set(f.id, f);
+  return [...out.values()];
 }
 
 function mergeSuppliers(local: Supplier[], incoming: Supplier[]): { merged: Supplier[]; added: number } {
@@ -195,6 +226,7 @@ export function mergeFromMain(payload: SyncPayload): SyncResult | SyncError {
   const incomingSuppliers = asArray<Supplier>(payload[KEYS.suppliers]);
   const incomingCompany = (payload[KEYS.company] as Company | undefined) ?? { name: "" };
 
+  const filiais = mergeFiliais(localFiliais, incomingFiliais);
   const { merged: products, updated: productsUpdated, added: productsAdded } = mergeProductsFromMain(
     localProducts,
     incomingProducts,
@@ -210,8 +242,23 @@ export function mergeFromMain(payload: SyncPayload): SyncResult | SyncError {
   );
   const purchases = [...localPurchases, ...purchasesToAdd];
 
-  const filiais = mergeFiliais(localFiliais, incomingFiliais);
   const { merged: suppliers, added: suppliersAdded } = mergeSuppliers(localSuppliers, incomingSuppliers);
+
+  // Matriz is source of truth for filial account codes / invoice series on filial PC.
+  const localFilial = localFilialId ? filiais.find((f) => f.id === localFilialId) : undefined;
+  const incomingFilialMatch =
+    localFilial && localFilial.accountCode
+      ? incomingFiliais.find((f) => normAccountCode(f.accountCode) === normAccountCode(localFilial.accountCode))
+      : undefined;
+  const syncedFiliais = filiais.map((f) => {
+    if (!localFilial || f.id !== localFilial.id || !incomingFilialMatch) return f;
+    return {
+      ...f,
+      accountCode: normAccountCode(incomingFilialMatch.accountCode || f.accountCode),
+      invoiceSeries: incomingFilialMatch.invoiceSeries || f.invoiceSeries,
+      nextInvoiceNumber: Math.max(f.nextInvoiceNumber ?? 1, incomingFilialMatch.nextInvoiceNumber ?? 1),
+    };
+  });
 
   const company: Company = {
     ...localCompany,
@@ -227,7 +274,7 @@ export function mergeFromMain(payload: SyncPayload): SyncResult | SyncError {
     [KEYS.products]: recomputed,
     [KEYS.purchases]: purchases,
     [KEYS.sales]: localSales,
-    [KEYS.filiais]: filiais,
+    [KEYS.filiais]: syncedFiliais,
     [KEYS.suppliers]: suppliers,
     [KEYS.company]: company,
     [KEYS.cash]: localCash,
@@ -270,7 +317,12 @@ export function mergeFromFilial(payload: SyncPayload): SyncResult | SyncError {
   const incomingPayments = asArray<SupplierPayment>(payload[KEYS.payments]);
   const incomingFreight = asArray<FreightEntry>(payload[KEYS.freight]);
 
-  const sourceFilialId = dominantFilialId(incomingSales);
+  const incomingCompany = (payload[KEYS.company] as Company | undefined) ?? { name: "" };
+
+  const filiais = mergeFiliais(localFiliais, incomingFiliais);
+  const filialIdMap = buildFilialIdMap(localFiliais, incomingFiliais);
+  const sourceFilialId =
+    dominantFilialId(incomingSales) || incomingCompany.currentFilialId || incomingFiliais[0]?.id;
 
   const { merged: products, added: productsAdded } = mergeProductsFromFilial(localProducts, incomingProducts);
   const idMap = buildIncomingProductIdMap(products, incomingProducts);
@@ -278,18 +330,22 @@ export function mergeFromFilial(payload: SyncPayload): SyncResult | SyncError {
   const saleIds = new Set(localSales.map((s) => s.id));
   const salesToAdd = incomingSales
     .filter((s) => !saleIds.has(s.id))
-    .map((s) => remapSalesProductIds([s], idMap)[0]);
+    .map((s) => remapSalesProductIds([s], idMap)[0])
+    .map((s) => remapSaleFilial(s, filialIdMap, incomingFiliais, filiais, sourceFilialId));
+  for (const s of salesToAdd) {
+    if (s.filialId && s.invoiceSeq) bumpInvoiceCounterIfNeeded(s.filialId, s.invoiceSeq);
+  }
   const sales = [...localSales, ...salesToAdd];
 
   const purchaseIds = new Set(localPurchases.map((p) => p.id));
   const purchasesToAdd = incomingPurchases.filter((p) => !purchaseIds.has(p.id));
   const purchases = [...localPurchases, ...purchasesToAdd];
 
-  const filiais = mergeFiliais(localFiliais, incomingFiliais);
   const { merged: suppliers, added: suppliersAdded } = mergeSuppliers(localSuppliers, incomingSuppliers);
 
+  const resolvedSourceId = sourceFilialId ? filialIdMap.get(sourceFilialId) ?? sourceFilialId : undefined;
   const belongsToFilial = <T extends { filialId?: string }>(item: T) =>
-    !sourceFilialId || (item.filialId ?? "") === sourceFilialId;
+    !resolvedSourceId || (item.filialId ?? "") === sourceFilialId || (item.filialId ?? "") === resolvedSourceId;
 
   const cashIds = new Set(localCash.map((c) => c.id));
   const cashToAdd = incomingCash.filter((c) => !cashIds.has(c.id) && belongsToFilial(c));
@@ -317,8 +373,8 @@ export function mergeFromFilial(payload: SyncPayload): SyncResult | SyncError {
     [KEYS.freight]: freight,
   });
 
-  const filialLabel = sourceFilialId
-    ? filiais.find((f) => f.id === sourceFilialId)?.name ?? "filial"
+  const filialLabel = resolvedSourceId
+    ? filiais.find((f) => f.id === resolvedSourceId)?.name ?? findFilialByAccountCode(filiais, salesToAdd[0]?.filialAccountCode)?.name ?? "filial"
     : "filial";
 
   return {
