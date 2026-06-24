@@ -356,6 +356,25 @@ export function todayKey() {
   return localDateKey();
 }
 
+/** Alias used by caixa / vendas. */
+export function todayISO() {
+  return localDateKey();
+}
+
+/** Local calendar YYYY-MM-DD from ISO — do NOT use iso.slice(0, 10) (that is UTC). */
+export function isoToLocalDateKey(iso: string): string {
+  if (!iso) return "";
+  return localDateKey(new Date(iso));
+}
+
+export function formatLocalDateTime(iso: string): string {
+  return new Date(iso).toLocaleString("pt-AO");
+}
+
+export function formatLocalTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString("pt-AO", { hour: "2-digit", minute: "2-digit" });
+}
+
 /** Format YYYY-MM-DD for display using local calendar (avoids UTC date-only parse shift). */
 export function formatLocalDateKey(dateKey: string) {
   const [y, m, d] = dateKey.split("-").map(Number);
@@ -370,11 +389,11 @@ export function localDateTimeISO(dateKey: string) {
 }
 
 export function isSameDay(iso: string, dayKey: string) {
-  return iso.slice(0, 10) === dayKey;
+  return isoToLocalDateKey(iso) === dayKey;
 }
 
 export function inMonth(iso: string, ym: string) {
-  return iso.slice(0, 7) === ym;
+  return isoToLocalDateKey(iso).slice(0, 7) === ym;
 }
 
 const DB_KEYS = [

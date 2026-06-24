@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useErp, fmt, type Purchase, productPickLabel } from "@/lib/erp-store";
+import { useErp, fmt, type Purchase, productPickLabel, todayISO, isoToLocalDateKey } from "@/lib/erp-store";
 import { useAccounts, filialName } from "@/lib/accounts-store";
 import { printPurchaseInvoice, type PdfResult } from "@/lib/invoices";
 import { Modal, PdfPreviewModal } from "./Modal";
@@ -9,7 +9,7 @@ type Line = { productId: string; qty: string; unitPrice: string };
 export function Purchases() {
   const { products, purchases, addPurchase, updatePurchase, removePurchase } = useErp();
   const { suppliers, filiais, company } = useAccounts();
-  const [date, setDate] = useState(new Date().toISOString().slice(0, 10));
+  const [date, setDate] = useState(todayISO());
   const [transport, setTransport] = useState("0");
   const [supplierId, setSupplierId] = useState("");
   const [filialId, setFilialId] = useState<string>(company.currentFilialId ?? "");
@@ -45,7 +45,7 @@ export function Purchases() {
     setFilialId(company.currentFilialId ?? "");
     setPaid(true);
     setEditingId(null);
-    setDate(new Date().toISOString().slice(0, 10));
+    setDate(todayISO());
   };
 
   const save = () => {
@@ -62,7 +62,7 @@ export function Purchases() {
 
   const openEdit = (p: Purchase) => {
     setEditingId(p.id);
-    setDate(p.date.slice(0, 10));
+    setDate(isoToLocalDateKey(p.date));
     setTransport(String(p.transport));
     setSupplierId(p.supplierId ?? "");
     setFilialId(p.filialId ?? "");

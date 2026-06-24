@@ -1,7 +1,7 @@
 import { dbRead, dbWrite } from "@/lib/db";
 import type { Sale } from "@/lib/erp-store";
 import { groupSales } from "@/lib/invoices";
-import { localDateKey } from "@/lib/erp-store";
+import { localDateKey, isoToLocalDateKey } from "@/lib/erp-store";
 
 const KEY = "erp.cashier-days.v1";
 
@@ -44,7 +44,7 @@ export function closeCashierDay(date: string, filialId: string | undefined, clos
 
 export function salesForDay(sales: Sale[], date: string, filialId?: string) {
   const fid = filialId ?? "";
-  return sales.filter((s) => localDateKey(new Date(s.date)) === date && (s.filialId ?? "") === fid);
+  return sales.filter((s) => isoToLocalDateKey(s.date) === date && (s.filialId ?? "") === fid);
 }
 
 export function daySalesSummary(sales: Sale[], date: string, filialId?: string) {

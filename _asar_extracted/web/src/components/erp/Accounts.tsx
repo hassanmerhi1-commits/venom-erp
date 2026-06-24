@@ -1,10 +1,10 @@
 import { Fragment, useEffect, useState } from "react";
 import { useAccounts, filialName, computeFilialStockQty, productFilialQty } from "@/lib/accounts-store";
-import { fmt, productCode, productTitle, productPickLabel } from "@/lib/erp-store";
+import { fmt, productCode, productTitle, productPickLabel, todayISO, isoToLocalDateKey } from "@/lib/erp-store";
 
 type Section = "caixa" | "fornecedores" | "fretes" | "stock" | "transferencias" | "empresa";
 
-const today = () => new Date().toISOString().slice(0, 10);
+const today = () => todayISO();
 
 export function Accounts() {
   const [filialFilter, setFilialFilter] = useState<string>("all");
@@ -106,7 +106,7 @@ function Caixa({ acc, filialFilter }: { acc: Acc; filialFilter: string }) {
     setType(c.type);
     setAmount(String(c.amount));
     setNote(c.note ?? "");
-    setDate(c.date.slice(0, 10));
+    setDate(isoToLocalDateKey(c.date));
   };
 
   const withdrawAll = () => {
@@ -489,7 +489,7 @@ function Fretes({ acc }: { acc: Acc }) {
     setTransporter(f.transporter === "—" ? "" : f.transporter);
     setAmount(String(f.amount));
     setNote(f.note ?? "");
-    setDate(f.date.slice(0, 10));
+    setDate(isoToLocalDateKey(f.date));
   };
 
   return (

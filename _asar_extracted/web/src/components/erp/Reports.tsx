@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState, useEffect } from "react";
-import { useErp, fmt, inMonth, productTitle, productCode } from "@/lib/erp-store";
+import { useErp, fmt, inMonth, productTitle, productCode, todayISO, isoToLocalDateKey, localDateKey, formatLocalDateKey } from "@/lib/erp-store";
 import { getCompany } from "@/lib/accounts-store";
 import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
@@ -131,8 +131,8 @@ function summaryRows(doc: jsPDF, startY: number, items: Array<[string, string]>)
 
 export function Reports() {
   const { products, purchases, sales } = useErp();
-  const [ym, setYm] = useState(new Date().toISOString().slice(0, 7));
-  const today = new Date().toISOString().slice(0, 10);
+  const [ym, setYm] = useState(todayISO().slice(0, 7));
+  const today = todayISO();
   const [day, setDay] = useState(today);
   const [from, setFrom] = useState(today);
   const [to, setTo] = useState(today);
@@ -400,13 +400,12 @@ export function Reports() {
     // ============ Sheet: Inventário ============
     const wsI = wb.addWorksheet("Inventário", { properties: { tabColor: { argb: BRAND_SOFT } } });
     const [yy, mm] = ym.split("-").map(Number);
-    const lastDay = new Date(yy, mm, 0).toISOString().slice(0, 10);
-    addCover(wsI, "Inventário", `Stock em ${new Date(lastDay).toLocaleDateString("pt-AO")} · valor a custo (c/ frete)`);
-    const cutoffEnd = lastDay + "T23:59:59";
+    const lastDay = localDateKey(new Date(yy, mm, 0));
+    addCover(wsI, "Inventário", `Stock em ${formatLocalDateKey(lastDay)} · valor a custo (c/ frete)`);
     const purchasedAfter = new Map<string, number>();
     const costMap = new Map<string, { qty: number; cost: number }>();
     for (const pu of purchases) {
-      if (pu.date > cutoffEnd) {
+      if (isoToLocalDateKey(pu.date) > lastDay) {
         for (const l of pu.lines) purchasedAfter.set(l.productId, (purchasedAfter.get(l.productId) ?? 0) + l.qty);
       } else {
         for (const l of pu.lines) {
@@ -417,7 +416,7 @@ export function Reports() {
       }
     }
     const soldAfter = new Map<string, number>();
-    for (const s of sales) if (s.date > cutoffEnd) soldAfter.set(s.productId, (soldAfter.get(s.productId) ?? 0) + s.qty);
+    for (const s of sales) if (isoToLocalDateKey(s.date) > lastDay) soldAfter.set(s.productId, (soldAfter.get(s.productId) ?? 0) + s.qty);
     let invUnits = 0, invValue = 0;
     const invRows = products.map((p) => {
       const stockAt = p.stock - (purchasedAfter.get(p.id) ?? 0) + (soldAfter.get(p.id) ?? 0);
@@ -455,11 +454,12 @@ export function Reports() {
 
   // ---- PDF helpers ----
   const filterByRange = <T extends { date: string }>(rows: T[], kind: RangeKind) => {
-    if (kind === "day") return rows.filter((r) => r.date.slice(0, 10) === day);
+    if (kind === "day") return rows.filter((r) => isoToLocalDateKey(r.date) === day);
     if (kind === "month") return rows.filter((r) => inMonth(r.date, ym));
-    const f = from + "T00:00:00";
-    const t = to + "T23:59:59";
-    return rows.filter((r) => r.date >= f && r.date <= t);
+    return rows.filter((r) => {
+      const dk = isoToLocalDateKey(r.date);
+      return dk >= from && dk <= to;
+    });
   };
 
   const rangeLabel = (kind: RangeKind) => {
@@ -625,11 +625,10 @@ export function Reports() {
 
   // Inventory at a given date: stock_at = currentStock - purchasesAfter + salesAfter
   const inventoryPdf = (atDate: string) => {
-    const cutoffEnd = atDate + "T23:59:59";
     const purchasedAfter = new Map<string, number>();
     const costAfter = new Map<string, { qty: number; cost: number }>();
     for (const pu of purchases) {
-      if (pu.date > cutoffEnd) {
+      if (isoToLocalDateKey(pu.date) > atDate) {
         for (const l of pu.lines) {
           purchasedAfter.set(l.productId, (purchasedAfter.get(l.productId) ?? 0) + l.qty);
         }
@@ -644,7 +643,7 @@ export function Reports() {
     }
     const soldAfter = new Map<string, number>();
     for (const s of sales) {
-      if (s.date > cutoffEnd) {
+      if (isoToLocalDateKey(s.date) > atDate) {
         soldAfter.set(s.productId, (soldAfter.get(s.productId) ?? 0) + s.qty);
       }
     }
@@ -714,13 +713,12 @@ export function Reports() {
     if (kind === "day") cutoff = day;
     else if (kind === "month") {
       const [y, m] = ym.split("-").map(Number);
-      cutoff = new Date(y, m, 0).toISOString().slice(0, 10);
+      cutoff = localDateKey(new Date(y, m, 0));
     } else cutoff = to;
-    const cutoffEnd = cutoff + "T23:59:59";
     const purchasedAfter = new Map<string, number>();
     const costMap = new Map<string, { qty: number; cost: number }>();
     for (const pu of purchases) {
-      if (pu.date > cutoffEnd) {
+      if (isoToLocalDateKey(pu.date) > cutoff) {
         for (const l of pu.lines) purchasedAfter.set(l.productId, (purchasedAfter.get(l.productId) ?? 0) + l.qty);
       } else {
         for (const l of pu.lines) {
@@ -731,7 +729,7 @@ export function Reports() {
       }
     }
     const soldAfter = new Map<string, number>();
-    for (const s of sales) if (s.date > cutoffEnd) soldAfter.set(s.productId, (soldAfter.get(s.productId) ?? 0) + s.qty);
+    for (const s of sales) if (isoToLocalDateKey(s.date) > cutoff) soldAfter.set(s.productId, (soldAfter.get(s.productId) ?? 0) + s.qty);
     let stockUnits = 0, stockValue = 0;
     for (const p of products) {
       const stockAt = p.stock - (purchasedAfter.get(p.id) ?? 0) + (soldAfter.get(p.id) ?? 0);
@@ -879,7 +877,7 @@ export function Reports() {
               </div>
               <button className="btn-secondary" onClick={() => {
                 const [y, m] = ym.split("-").map(Number);
-                const last = new Date(y, m, 0).toISOString().slice(0, 10);
+                const last = localDateKey(new Date(y, m, 0));
                 setInvDate(last);
               }}>Fim do mês ({ym})</button>
               <button className="btn-primary" onClick={() => inventoryPdf(invDate)}>Gerar PDF</button>

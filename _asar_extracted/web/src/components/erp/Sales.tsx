@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useErp, fmt, type Sale, productPickLabel, productTitle, localDateTimeISO, formatLocalDateKey } from "@/lib/erp-store";
+import { useErp, fmt, type Sale, productPickLabel, productTitle, localDateTimeISO, formatLocalDateKey, isoToLocalDateKey, formatLocalDateTime, formatLocalTime } from "@/lib/erp-store";
 import { useAccounts, filialName, getCompany, getFilialStockQty } from "@/lib/accounts-store";
 import { useAuth } from "@/lib/auth";
 import { printSaleInvoice, groupSales, type PdfResult } from "@/lib/invoices";
@@ -195,7 +195,7 @@ export function Sales() {
 
   const openEdit = (group: Sale[]) => {
     setEditingDate(group[0].date);
-    setDate(group[0].date.slice(0, 10));
+    setDate(isoToLocalDateKey(group[0].date));
     setFilialId(group[0].filialId ?? "");
     setCustomerName(group[0].customerName ?? "");
     setItems(group.map((s) => ({ productId: s.productId, qty: String(s.qty), unitPrice: String(s.unitPrice) })));
@@ -350,7 +350,7 @@ export function Sales() {
               const total = group.reduce((a, s) => a + s.revenue, 0);
               return (
                 <li key={group[0].date + group[0].id} className="flex justify-between py-2 text-sm">
-                  <span>{new Date(group[0].date).toLocaleTimeString("pt-AO")} · {group.length} item(ns)</span>
+                  <span>{formatLocalTime(group[0].date)} · {group.length} item(ns)</span>
                   <span className="font-semibold tabular-nums">{fmt(total)}</span>
                 </li>
               );
@@ -376,7 +376,7 @@ export function Sales() {
                     <div className="flex items-center justify-between gap-3">
                       <div className="text-sm">
                         <div className="flex flex-wrap items-center gap-2 font-medium">
-                          {first.invoiceNumber ?? `Fatura · ${new Date(first.date).toLocaleString("pt-AO")}`}
+                          {first.invoiceNumber ?? "Fatura"}
                           {filiais.length > 0 && (
                             <span className="pill" style={{ background: "color-mix(in oklab, var(--primary) 16%, transparent)", color: "var(--primary)" }}>
                               🏪 {first.filialAccountCode ? `Conta ${first.filialAccountCode}` : filialName(filiais, first.filialId)}
@@ -385,7 +385,7 @@ export function Sales() {
                         </div>
                         <div className="text-xs text-muted-foreground">
                           {first.customerName ? <>Cliente: {first.customerName} · </> : null}
-                          {new Date(first.date).toLocaleString("pt-AO")} · {group.length} produto(s) · {units} unidade(s)
+                          {formatLocalDateTime(first.date)} · {group.length} produto(s) · {units} unidade(s)
                         </div>
                       </div>
                       <div className="flex items-center gap-2">

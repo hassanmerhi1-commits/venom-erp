@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useErp, fmt, productCode, productTitle, productPickLabel } from "@/lib/erp-store";
+import { useErp, fmt, productCode, productTitle, productPickLabel, isoToLocalDateKey } from "@/lib/erp-store";
 import type { Product } from "@/lib/erp-store";
 import { useAccounts, productFilialQty, productTotalFilialQty } from "@/lib/accounts-store";
 import { Modal } from "./Modal";
@@ -81,7 +81,7 @@ function EditProductModal({
           </div>
           <div>
             <div className="text-muted-foreground">Criado em</div>
-            <div className="text-sm font-semibold tabular-nums">{product.createdAt.slice(0, 10)}</div>
+            <div className="text-sm font-semibold tabular-nums">{isoToLocalDateKey(product.createdAt)}</div>
           </div>
         </div>
         {filiais.length > 0 && (
@@ -482,7 +482,7 @@ export function Products() {
                           className="border-t border-[var(--border)]"
                           style={i % 2 === 1 ? { background: "color-mix(in oklab, var(--muted) 25%, transparent)" } : undefined}
                         >
-                          <td className="px-5 py-3 tabular-nums">{e.date.slice(0, 10)}</td>
+                          <td className="px-5 py-3 tabular-nums">{isoToLocalDateKey(e.date)}</td>
                           <td className="px-3 py-3">
                             <span
                               className="pill"
